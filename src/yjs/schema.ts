@@ -1,27 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/*
-CRDT Notebook Schema
----------------------------------
-Key decisions retained + fixes applied:
-- Single-notebook-per-doc: The Y.Doc's root map **is the notebook**.
-- Outputless Execution Model: results/blobs stay out of CRDT; only logic + replay anchors.
-- Scope separation: org-scope shares notebook content; person-scope stores local cache.
-- Derived data stays out of CRDT (cell index now in-memory WeakMap, not a Y.Map).
-- Tombstones are undoable; maintenance (vacuum) uses special origin to avoid polluting Undo.
-- Exec concurrency: add runId + seq; 'running' should be presence/person-scope; CRDT stores last completed.
-- Safer migrations: prevent premature version writes; legacy hoist is done via plain-model rebuild to avoid Y child moving.
-
-What changed vs v3.5:
-1) ⚠ Migration safety: version is **not** written during ensure; set only after migrations run.
-2) 🧱 Legacy hoist (v35) uses plain-model rebuild to avoid moving Y children between parents.
-3) 🧭 Derived index removed from CRDT (no NB_CELL_INDEX_KEY); use runtime WeakMap + attachMaintainer.
-4) 🕒 Vacuum writes use VACUUM_ORIGIN so Undo stack stays clean; tombstones remain undoable.
-5) 🚦 Exec meta strengthened: add runId + seq; keep queryHash as deprecated alias to fingerprint.
-6) 🆔 IDs switch to monotonic-ish IDs for better ordering; recommend UUIDv7 externally.
-7) ✅ Validation extended; migrations include v36 to adopt fingerprint + drop old index key gracefully.
----------------------------------
-*/
-
 import * as Y from "yjs";
 import { ulid } from "ulid";
 
@@ -40,7 +17,7 @@ export const MAINT_ORIGIN = Symbol("MAINTENANCE");
 // ------------------------------
 // Versions & Constants
 // ------------------------------
-export const SCHEMA_VERSION = 37 as const; // v3.6 FINAL
+export const SCHEMA_VERSION = 38 as const; // v3.6 FINAL
 
 // Root keys (root == notebook)
 export const ROOT_NOTEBOOK_KEY = "rw-notebook-root"; // Y.Map<any> (the notebook itself)
@@ -54,7 +31,7 @@ export const NB_TAGS = "tags"; // Y.Array<string>
 export const NB_METADATA = "metadata"; // Y.Map<any>
 export const NB_CELLS = "cells"; // Y.Array<YCell>
 export const NB_TOMBSTONES = "tombstones"; // Y.Map<boolean>
-export const NB_TOMBSTONE_META = "tombstone-meta"; // Y.Map<string,{deletedAt:number, reason?:string}>
+export const NB_TOMBSTONE_META = "tombstone-meta"; // Y.Map<string,{deletedAt?:number, reason?:string, clock?:"trusted"|"local"}>
 
 // Cell keys
 export const CELL_ID = "id";
@@ -65,16 +42,35 @@ export const CELL_META = "metadata"; // Y.Map<any> (shallow only)
 export const CELL_FINGERPRINT = "fingerprint"; // string (hash of deterministic inputs)
 export const CELL_EXEC_BY = "executedBy"; // optional userId (for audit)
 
+// Guard origins
+const CELL_ID_GUARD_ORIGIN = Symbol("CELL_ID_GUARD");
+
+export interface ClockSource {
+  now(): number;
+  trusted: boolean;
+}
+
+export const systemClock: ClockSource = {
+  now: () => Date.now(),
+  trusted: false,
+};
+
+const DEFAULT_FUTURE_SKEW_MS = 5 * 60 * 1000; // 5 minutes safety window
+
 // ------------------------------
 // TypeScript model layer (non-Y)
 // ------------------------------
 export type CellKind = "sql" | "markdown" | "code" | "chart" | "raw";
 
 export interface CellMetadataModel {
-  collapsed?: boolean;
-  executionPolicy?: "manual" | "onChange" | "onStart";
-  params?: Record<string, unknown>;
+  backgroundDDL?: boolean; // execute DDL in background
 }
+
+export const DEFAULT_CELL_METADATA: Readonly<{
+  backgroundDDL: boolean;
+}> = Object.freeze({
+  backgroundDDL: false,
+});
 
 export interface CellModel {
   id: string;
@@ -134,11 +130,7 @@ export const ensureNotebookRoot = (doc: Y.Doc): NotebookRoot => {
 // ------------------------------
 // Creation helpers
 // ------------------------------
-export const createDefaultNotebookMetadata = (): NotebookMetadataModel => ({
-  appVersion: undefined,
-});
-
-export const createNotebookInDoc = (
+export const ensureNotebookInDoc = (
   doc: Y.Doc,
   init?: Partial<NotebookModel>
 ): YNotebook => {
@@ -154,23 +146,43 @@ export const createNotebookInDoc = (
   // tags
   if (!root.has(NB_TAGS)) root.set(NB_TAGS, new Y.Array<string>());
   const tags = root.get(NB_TAGS) as Y.Array<string>;
-  if (init?.tags?.length) init.tags.forEach((t) => tags.push([t]));
+  if (init?.tags?.length) {
+    const existing = new Set(tags.toArray());
+    const newTags = init.tags.filter((t) => !existing.has(t));
+    if (newTags.length) tags.push(newTags);
+  }
 
   // metadata
   if (!root.has(NB_METADATA)) root.set(NB_METADATA, new Y.Map<any>());
   const meta = root.get(NB_METADATA) as Y.Map<any>;
-  const metaVal = {
-    ...createDefaultNotebookMetadata(),
-    ...(init?.metadata ?? {}),
-  };
-  for (const [k, v] of Object.entries(metaVal))
-    if (!meta.has(k)) meta.set(k, v);
+  if (init?.metadata) {
+    for (const [k, v] of Object.entries(init.metadata)) {
+      if (v === undefined || meta.has(k)) continue;
+      meta.set(k, v);
+    }
+  }
 
   // cells
   if (!root.has(NB_CELLS)) root.set(NB_CELLS, new Y.Array<YCell>());
   const cells = root.get(NB_CELLS) as Y.Array<YCell>;
-  if (init?.cells?.length)
-    init.cells.forEach((c) => cells.push([createCell(c)]));
+  if (init?.cells?.length) {
+    const existing = cells.toArray();
+    const existingIds = new Set(existing.map((c) => c.get(CELL_ID)));
+    // Avoid seeding anonymous cells when content already exists;
+    // duplicates are impossible to detect without stable IDs.
+    const allowBulkSeed = existing.length === 0;
+    init.cells.forEach((c) => {
+      const seedHasId = c.id != null;
+      if (seedHasId && existingIds.has(c.id!)) return;
+      if (!seedHasId && !allowBulkSeed) return;
+      const yCell = createCell(c);
+      cells.push([yCell]);
+      existingIds.add(yCell.get(CELL_ID));
+    });
+  }
+
+  // Ensure all resident cells have id guards attached.
+  cells.forEach((c: YCell) => lockCellId(c));
 
   // tombstones + meta
   if (!root.has(NB_TOMBSTONES)) root.set(NB_TOMBSTONES, new Y.Map<boolean>());
@@ -178,6 +190,34 @@ export const createNotebookInDoc = (
     root.set(NB_TOMBSTONE_META, new Y.Map<any>());
 
   return root;
+};
+
+export const createNotebookInDoc = ensureNotebookInDoc;
+
+const CELL_ID_REGISTRY: WeakMap<YCell, string> = new WeakMap();
+
+const lockCellId = (cell: YCell) => {
+  if (CELL_ID_REGISTRY.has(cell)) return;
+  const id = cell.get(CELL_ID);
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error("Cell id must be a non-empty string");
+  }
+  CELL_ID_REGISTRY.set(cell, id);
+  cell.observe((event) => {
+    if (event.transaction?.origin === CELL_ID_GUARD_ORIGIN) return;
+    if (!event.keysChanged.has(CELL_ID)) return;
+    const locked = CELL_ID_REGISTRY.get(cell);
+    if (!locked) return;
+    const current = cell.get(CELL_ID);
+    if (current === locked) return;
+    const doc = cell.doc as Y.Doc | undefined;
+    const reset = () => cell.set(CELL_ID, locked);
+    if (doc) {
+      doc.transact(reset, CELL_ID_GUARD_ORIGIN);
+    } else {
+      reset();
+    }
+  });
 };
 
 export const createCell = (
@@ -194,16 +234,21 @@ export const createCell = (
   c.set(CELL_SOURCE, text);
 
   const m = new Y.Map<any>();
-  const mval: CellMetadataModel = {
-    collapsed: false,
-    executionPolicy: "manual",
-    ...(init?.metadata ?? {}),
-  };
-  for (const [k, v] of Object.entries(mval)) m.set(k, v);
+  const md = init?.metadata;
+  if (md) {
+    if (
+      md.backgroundDDL !== undefined &&
+      md.backgroundDDL !== DEFAULT_CELL_METADATA.backgroundDDL
+    ) {
+      m.set("backgroundDDL", md.backgroundDDL);
+    }
+  }
   c.set(CELL_META, m);
 
   if (init.fingerprint) c.set(CELL_FINGERPRINT, init.fingerprint);
   if (init.executedBy) c.set(CELL_EXEC_BY, init.executedBy);
+
+  lockCellId(c);
 
   return c;
 };
@@ -239,7 +284,10 @@ export const rebuildMemCellIndex = (nb: YNotebook) => {
   const m = getMemIndex(nb);
   m.clear();
   const cells = nb.get(NB_CELLS) as Y.Array<YCell> | undefined;
-  cells?.toArray().forEach((c, i) => m.set(c.get(CELL_ID), i));
+  cells?.toArray().forEach((c, i) => {
+    lockCellId(c);
+    m.set(c.get(CELL_ID), i);
+  });
 };
 
 export const attachMemIndexMaintainer = (nb: YNotebook) => {
@@ -260,9 +308,10 @@ export const attachMemIndexMaintainer = (nb: YNotebook) => {
         });
         pairs.forEach(([id, v]) => m.set(id, v));
         // set newly inserted
-        inserted.forEach((c: YCell, k: number) =>
-          m.set(c.get(CELL_ID), cursor + k)
-        );
+        inserted.forEach((c: YCell, k: number) => {
+          lockCellId(c);
+          m.set(c.get(CELL_ID), cursor + k);
+        });
         cursor += n;
       }
       if (op.delete) {
@@ -306,9 +355,7 @@ export const yCellToModel = (c: YCell): CellModel => {
 
   const mdY = c.get(CELL_META) as Y.Map<any> | undefined;
   const metadata: CellMetadataModel = {
-    collapsed: mdY?.get("collapsed") ?? false,
-    executionPolicy: mdY?.get("executionPolicy") ?? "manual",
-    params: mdY?.get("params") ?? undefined,
+    backgroundDDL: mdY?.get("backgroundDDL") ?? DEFAULT_CELL_METADATA.backgroundDDL,
   };
 
   return {
@@ -361,49 +408,179 @@ export const tombstonesMap = (nb: YNotebook): Y.Map<boolean> => {
   }
   return t;
 };
-export const tombstoneMetaMap = (nb: YNotebook): Y.Map<any> => {
-  let m = nb.get(NB_TOMBSTONE_META) as Y.Map<any> | undefined;
+
+export type TombstoneClock = "trusted" | "local";
+
+export interface TombstoneMeta {
+  deletedAt?: number;
+  reason?: string;
+  clock?: TombstoneClock;
+}
+
+const isValidTombstoneClock = (value: unknown): value is TombstoneClock =>
+  value === "trusted" || value === "local";
+
+export const tombstoneMetaMap = (nb: YNotebook): Y.Map<TombstoneMeta> => {
+  let m = nb.get(NB_TOMBSTONE_META) as Y.Map<TombstoneMeta> | undefined;
   if (!m) {
-    m = new Y.Map<any>();
+    m = new Y.Map<TombstoneMeta>();
     nb.set(NB_TOMBSTONE_META, m);
   }
   return m;
 };
 
+export interface SoftDeleteOptions {
+  timestamp?: number;
+  trusted?: boolean;
+  clock?: ClockSource;
+}
+
+const resolveDeletionTimestamp = (
+  opts?: SoftDeleteOptions
+): { timestamp?: number; clock?: TombstoneClock } => {
+  const fallbackClock = opts?.clock ?? systemClock;
+  const hasExplicitTimestamp = opts?.timestamp != null;
+  const ts = hasExplicitTimestamp
+    ? opts!.timestamp!
+    : fallbackClock.now();
+
+  if (typeof ts !== "number" || Number.isNaN(ts)) return {};
+  if (ts < WALL_CLOCK_EPOCH_FLOOR_MS) return {};
+
+  const trusted =
+    opts?.trusted ??
+    (hasExplicitTimestamp
+      ? true
+      : fallbackClock.trusted ?? false);
+
+  return { timestamp: ts, clock: trusted ? "trusted" : "local" };
+};
+
+const writeTombstoneMeta = (
+  tm: Y.Map<TombstoneMeta>,
+  id: string,
+  update: Partial<TombstoneMeta>
+) => {
+  const current = tm.get(id);
+  const next: TombstoneMeta = { ...current, ...update };
+  tm.set(id, next);
+};
+
 export const softDeleteCell = (
   nb: YNotebook,
   cellId: string,
-  reason?: string
+  reason?: string,
+  opts?: SoftDeleteOptions
 ) => {
-  const arr = getCellsArray(nb);
-  const idx = arr.toArray().findIndex((c) => c.get(CELL_ID) === cellId);
-  if (idx >= 0) arr.delete(idx, 1);
+  const doc = nb.doc as Y.Doc | undefined;
+  const applyDelete = () => {
+    const arr = getCellsArray(nb);
+    const idx = arr.toArray().findIndex((c) => c.get(CELL_ID) === cellId);
+    if (idx >= 0) arr.delete(idx, 1);
 
-  const t = tombstonesMap(nb);
-  t.set(cellId, true);
+    const t = tombstonesMap(nb);
+    t.set(cellId, true);
 
-  const tm = tombstoneMetaMap(nb);
-  const now = Date.now();
-  if (now >= WALL_CLOCK_EPOCH_FLOOR_MS)
-    tm.set(cellId, { deletedAt: now, reason });
+    const tm = tombstoneMetaMap(nb);
+    const resolved = resolveDeletionTimestamp(opts);
+    const metaUpdate: Partial<TombstoneMeta> = {};
+    const actualReason = reason ?? undefined;
+    if (actualReason !== undefined) metaUpdate.reason = actualReason;
+    if (resolved.timestamp !== undefined) metaUpdate.deletedAt = resolved.timestamp;
+    if (resolved.clock) metaUpdate.clock = resolved.clock;
+    if (Object.keys(metaUpdate).length) {
+      writeTombstoneMeta(tm, cellId, metaUpdate);
+    } else if (!tm.has(cellId)) {
+      tm.set(cellId, {});
+    }
+  };
+
+  if (doc) {
+    doc.transact(applyDelete, USER_ACTION_ORIGIN);
+  } else {
+    applyDelete();
+  }
+};
+
+export interface TombstoneTimestampOptions {
+  reason?: string;
+  trusted?: boolean;
+  origin?: symbol;
+  clock?: ClockSource;
+}
+
+export const setTombstoneTimestamp = (
+  nb: YNotebook,
+  cellId: string,
+  timestamp: number,
+  opts?: TombstoneTimestampOptions
+) => {
+  if (typeof timestamp !== "number" || Number.isNaN(timestamp)) return;
+  if (timestamp < WALL_CLOCK_EPOCH_FLOOR_MS) return;
+
+  const resolvedClock =
+    opts?.trusted ?? opts?.clock?.trusted ?? true
+      ? ("trusted" as TombstoneClock)
+      : ("local" as TombstoneClock);
+
+  const doc = nb.doc as Y.Doc | undefined;
+  const apply = () => {
+    const tombstones = tombstonesMap(nb);
+    if (!tombstones.get(cellId)) tombstones.set(cellId, true);
+
+    const tm = tombstoneMetaMap(nb);
+    const update: Partial<TombstoneMeta> = {
+      deletedAt: timestamp,
+      clock: resolvedClock,
+    };
+    if (opts?.reason !== undefined) update.reason = opts.reason;
+    writeTombstoneMeta(tm, cellId, update);
+  };
+
+  if (doc) {
+    doc.transact(apply, opts?.origin ?? MAINT_ORIGIN);
+  } else {
+    apply();
+  }
 };
 
 export const vacuumNotebook = (
   nb: YNotebook,
-  ttlMs = 30 * 24 * 3600 * 1000
+  ttlMs = 30 * 24 * 3600 * 1000,
+  opts?: {
+    clock?: ClockSource;
+    now?: number;
+    nowTrusted?: boolean;
+    acceptUntrustedClock?: boolean;
+    maxFutureSkewMs?: number;
+  }
 ) => {
   const t = tombstonesMap(nb);
   const tm = tombstoneMetaMap(nb);
-  const now = Date.now();
+  const clock = opts?.clock;
+  const nowValue = opts?.now ?? (clock ? clock.now() : systemClock.now());
+  const nowTrusted =
+    opts?.nowTrusted ??
+    (opts?.now != null ? true : clock?.trusted ?? false);
+  const maxFutureSkew = opts?.maxFutureSkewMs ?? DEFAULT_FUTURE_SKEW_MS;
+  const allowUntrusted = opts?.acceptUntrustedClock ?? false;
   const doc = (nb as any).doc as Y.Doc | undefined;
 
-  doc?.transact(() => {
+  const sweep = () => {
     t.forEach((flag, id) => {
       if (!flag) return;
-      const meta = tm.get(id) as { deletedAt?: number } | undefined;
-      const deletedAt = meta?.deletedAt ?? 0;
-      if (deletedAt === 0) return;
-      if (now - deletedAt < ttlMs) return;
+      const meta = tm.get(id);
+      const deletedAt = meta?.deletedAt;
+      const clockLabel = meta?.clock;
+
+      if (deletedAt == null || deletedAt <= 0) return;
+
+      const timestampTrusted = clockLabel === "trusted";
+      if (timestampTrusted && !nowTrusted) return;
+      if (!timestampTrusted && !allowUntrusted) return;
+
+      if (deletedAt - nowValue > maxFutureSkew) return;
+      if (nowValue - deletedAt < ttlMs) return;
 
       const arr = getCellsArray(nb);
       const stillThere = arr.toArray().some((c) => c.get(CELL_ID) === id);
@@ -412,7 +589,13 @@ export const vacuumNotebook = (
       t.delete(id);
       tm.delete(id);
     });
-  }, VACUUM_ORIGIN);
+  };
+
+  if (doc) {
+    doc.transact(sweep, VACUUM_ORIGIN);
+  } else {
+    sweep();
+  }
 };
 
 // ------------------------------
@@ -487,6 +670,28 @@ export const validateNotebook = (nb: YNotebook): ValidationIssue[] => {
       });
   });
 
+  const tm = nb.get(NB_TOMBSTONE_META) as Y.Map<TombstoneMeta> | undefined;
+  tm?.forEach((meta, id) => {
+    if (!meta) return;
+    if (
+      meta.deletedAt != null &&
+      (typeof meta.deletedAt !== "number" || Number.isNaN(meta.deletedAt))
+    ) {
+      issues.push({
+        path: `tombstone-meta.${id}`,
+        level: "warning",
+        message: `Invalid deletedAt for tombstone ${id}`,
+      });
+    }
+    if (meta.clock != null && !isValidTombstoneClock(meta.clock)) {
+      issues.push({
+        path: `tombstone-meta.${id}`,
+        level: "warning",
+        message: `Invalid clock tag for tombstone ${id}`,
+      });
+    }
+  });
+
   return issues;
 };
 
@@ -520,24 +725,8 @@ export const migrateNotebookIfNeeded = (doc: Y.Doc) => {
 // ------------------------------
 export const bootstrapDoc = (doc: Y.Doc, init?: Partial<NotebookModel>) => {
   migrateNotebookIfNeeded(doc);
-  const root = createNotebookInDoc(doc, init);
+  const root = ensureNotebookInDoc(doc, init);
   // Attach runtime index maintainer (non-CRDT)
   attachMemIndexMaintainer(root);
   return root;
 };
-
-// ------------------------------
-// Execution Consistency Notes (non-code policy)
-// ------------------------------
-/*
-- fingerprint (CELL_FINGERPRINT) should be computed from deterministic, non-sensitive inputs:
-  hash( canonicalSQLOrSource + JSON.stringify(params) + JSON.stringify(publicEnv) )
-  where publicEnv may include databaseId/schema name, but never tokens/credentials.
-
-- Person-scope cache SHOULD index results by {orgId,userId,cellId,fingerprint} and is not synced via CRDT.
-- UI MUST NOT use shared fingerprint to invalidate personal cache directly; use it only as an org-level hint.
-- Presence/awareness (cursor/selection/running) must stay out of CRDT; keep in awareness channels.
-- Exec CRDT SHOULD represent **last completed** execution. Live 'running' signals go via presence.
-- All structural edits should be wrapped in doc.transact(fn, USER_ACTION_ORIGIN) so UndoManager can track only user actions.
-- Maintenance (vacuum/reindex) should use VACUUM_ORIGIN / MAINT_ORIGIN and be excluded from tracked origins if configured.
-*/
