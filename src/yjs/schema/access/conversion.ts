@@ -16,14 +16,14 @@ import {
   NB_TOMBSTONES,
 } from "../core/keys";
 import {
-  CellKind,
-  CellMetadataModel,
-  CellModel,
+  type CellKind,
+  type CellMetadataModel,
+  type CellModel,
   DEFAULT_CELL_METADATA,
-  NotebookMetadataModel,
-  NotebookModel,
-  YCell,
-  YNotebook,
+  type NotebookMetadataModel,
+  type NotebookModel,
+  type YCell,
+  type YNotebook,
 } from "../core/types";
 
 export const yCellToModel = (c: YCell): CellModel => {

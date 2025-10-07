@@ -1,5 +1,3 @@
-import * as Y from "yjs";
-
 export interface ClockSource {
   now(): number;
   trusted: boolean;
