@@ -1,5 +1,9 @@
 # 基于 Yjs、Jotai 和 React 的实时协同 Monaco Editor 引擎
 
+## Known Issues
+
+- [ ] Yjs Undo 在“用户 move 后，再有其它对同一 Y.Array 的 interleaving 修改（即便 MAINT_ORIGIN 未被追踪）”时，撤销语义对时序较敏感，容易出现非预期重复。
+
 参考文档
 
 - Yjs Notebook Schema 设计与操作总览：docs/yjs-schema-design.md

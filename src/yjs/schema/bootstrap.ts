@@ -22,6 +22,7 @@ export const ensureNotebookInDoc = (doc: Y.Doc, init?: Partial<NotebookModel>): 
 
   // 标识字段
   if (!root.has(NB_ID)) {
+    // we should use a server-assigned id in most cases
     console.warn("Client-side notebook initialization occurred unexpectedly.");
     root.set(NB_ID, init?.id ?? ulid());
   }
