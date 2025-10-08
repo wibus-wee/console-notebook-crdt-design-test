@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { USER_ACTION_ORIGIN } from "../core/origins";
 import { CELL_ID, NB_TOMBSTONES, NB_TOMBSTONE_META } from "../core/keys";
-import { YCell, type YNotebook } from "../core/types";
+import type { YCell, YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { lockCellId } from "../access/cells";
 
@@ -59,7 +59,7 @@ export const removeCell = (
 
     const tomb = nb.get(NB_TOMBSTONES) as Y.Map<boolean> | undefined;
     tomb?.delete(id);
-    const tm = nb.get(NB_TOMBSTONE_META) as Y.Map<any> | undefined;
+    const tm = nb.get(NB_TOMBSTONE_META) as Y.Map<unknown> | undefined;
     tm?.delete(id);
   };
   if (doc) {

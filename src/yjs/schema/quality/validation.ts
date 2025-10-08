@@ -1,9 +1,9 @@
 import * as Y from "yjs";
-import { NB_CELL_ORDER, NB_TOMBSTONES } from "../core/keys";
+import { NB_TOMBSTONES } from "../core/keys";
 import { CELL_ID, CELL_KIND } from "../core/keys";
-import { YNotebook, YCell } from "../core/types";
+import type { YNotebook, YCell } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
-import { TombstoneMetaMap, tombstoneMetaMap, isValidTombstoneClock } from "../access/tombstone";
+import { type TombstoneMetaMap, tombstoneMetaMap, isValidTombstoneClock } from "../access/tombstone";
 
 export interface ValidationIssue {
   path: string;

@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { UndoManager } from "yjs";
 import { USER_ACTION_ORIGIN } from "../core/origins";
 import { NB_CELL_MAP, NB_CELL_ORDER, NB_TOMBSTONE_META, NB_TOMBSTONES } from "../core/keys";
-import { YNotebook, YCell } from "../core/types";
+import type { YNotebook, YCell } from "../core/types";
 
 /**
  * 仅追踪用户动作：order（顺序变更）与 cellMap（内容变更）

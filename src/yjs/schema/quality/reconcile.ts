@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { MAINT_ORIGIN } from "../core/origins";
-import { YNotebook } from "../core/types";
+import type { YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { tombstonesMap } from "../access/tombstone";
 
