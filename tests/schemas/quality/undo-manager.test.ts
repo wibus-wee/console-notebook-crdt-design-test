@@ -4,7 +4,7 @@ import { ensureNotebookInDoc } from "@/yjs/schema/bootstrap";
 import { getCellMap, getOrder } from "@/yjs/schema/access/accessors";
 import { createNotebookUndoManager } from "@/yjs/schema/quality/undo";
 import { reconcileNotebook } from "@/yjs/schema/quality/reconcile";
-import { MAINT_ORIGIN, USER_ACTION_ORIGIN } from "@/yjs/schema/core/origins";
+import { MAINT_ORIGIN } from "@/yjs/schema/core/origins";
 import { softDeleteCell } from "@/yjs/schema/ops/soft_delete";
 import { tombstonesMap, tombstoneMetaMap } from "@/yjs/schema/access/tombstone";
 import { moveCell } from "@/yjs/schema/ops/mutations";
@@ -69,7 +69,38 @@ describe("UndoManager integration (small step)", () => {
     expect(tombstoneMetaMap(nb).get("x")).toBeTruthy();
   });
 
-  // Note: Combined scenarios of user move and later maintenance edits on the
-  // same Y.Array can exhibit Yjs undo semantics that are sensitive to
-  // interleaving. We keep combined coverage minimal to avoid flakiness.
+  it("user move → reconcile appends orphan → undo reverts move without duplicates", () => {
+    const doc = new Y.Doc();
+    const nb = ensureNotebookInDoc(doc, { title: "t" });
+    const order = getOrder(nb);
+    const map = getCellMap(nb);
+
+    // Prepare: a, b in order; c is orphan
+    map.set("a", new Y.Map());
+    map.set("b", new Y.Map());
+    map.set("c", new Y.Map());
+    const len = order.length;
+    if (len) order.delete(0, len);
+    order.push(["a", "b"]);
+
+    const um = createNotebookUndoManager(nb);
+
+    // User move (tracked): move 'b' to front
+    moveCell(nb, "b", 0);
+    um.stopCapturing();
+    expect(order.toArray()).toEqual(["b", "a"]);
+
+    // Maintenance (not tracked): reconcile appends orphan 'c'
+    const r = reconcileNotebook(nb);
+    expect(r.appendedOrphans).toEqual(["c"]);
+    expect(order.toArray()).toEqual(["b", "a", "c"]);
+
+    // Undo only reverts the move; orphan 'c' persists and no duplicates appear
+    um.undo();
+    expect(order.toArray()).toEqual(["a", "b", "c"]);
+
+    // Redo re-applies the move; orphan stays
+    um.redo();
+    expect(order.toArray()).toEqual(["b", "a", "c"]);
+  });
 });
