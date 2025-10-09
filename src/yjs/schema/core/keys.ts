@@ -19,7 +19,7 @@ export const NB_TOMBSTONE_META = "tombstoneMeta"; // Y.Map<string, Y.Map<any>>
 
 // Cell keys
 export const CELL_ID = "id";
-export const CELL_KIND = "kind"; // 'sql' | 'markdown' | 'code' | 'chart' | 'raw'
+export const CELL_KIND = "kind"; // 'sql' | 'markdown'
 export const CELL_LANG = "language"; // optional
 export const CELL_SOURCE = "source"; // Y.Text
 export const CELL_META = "metadata"; // Y.Map<any> (仅浅层)
