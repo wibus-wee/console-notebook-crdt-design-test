@@ -7,6 +7,10 @@ import type { editor } from "monaco-editor";
 
 interface MonacoEditorProps {
   value?: string;
+  /** When false, the editor is uncontrolled and uses defaultValue. */
+  controlled?: boolean;
+  /** Only used when controlled === false */
+  defaultValue?: string;
   language?: string;
   onChange?: (value: string) => void;
   onMount?: (editor: editor.IStandaloneCodeEditor) => void;
@@ -30,6 +34,8 @@ interface MonacoEditorHandle {
 
 const MonacoEditor = memo(function MonacoEditor({
   value = "",
+  controlled = true,
+  defaultValue,
   language = "sql",
   onChange,
   onMount,
@@ -150,9 +156,10 @@ const MonacoEditor = memo(function MonacoEditor({
         className="h-auto min-h-40"
         height={autoResize ? editorHeight : height}
         language={language}
-        value={value}
+        {...(controlled
+          ? { value, onChange: handleEditorChange }
+          : { defaultValue })}
         theme={"light"}
-        onChange={handleEditorChange}
         onMount={handleEditorDidMount}
         options={defaultOptions}
         loading={
