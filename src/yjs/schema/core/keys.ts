@@ -20,9 +20,10 @@ export const NB_TOMBSTONE_META = "tombstoneMeta"; // Y.Map<string, Y.Map<any>>
 // Cell keys
 export const CELL_ID = "id";
 export const CELL_KIND = "kind"; // 'sql' | 'markdown'
-export const CELL_LANG = "language"; // optional
+// export const CELL_LANG = "language"; // optional
 export const CELL_SOURCE = "source"; // Y.Text
 export const CELL_META = "metadata"; // Y.Map<any> (仅浅层)
 export const CELL_FINGERPRINT = "fingerprint"; // string (哈希)
-export const CELL_EXEC_BY = "executedBy"; // optional userId
+export const CELL_EXEC_BY = "executedBy"; // userId
 
+export const CELL_OUTPUTS = "outputs"; // Y.Array<Y.Map<any>>

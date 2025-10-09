@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-export type CellKind = "sql" | "markdown" | "code" | "chart" | "raw";
+export type CellKind = "sql" | "markdown";
 
 export interface CellMetadataModel {
   backgroundDDL?: boolean;
@@ -12,7 +12,6 @@ export const DEFAULT_CELL_METADATA: Readonly<CellMetadataModel> = Object.freeze(
 export interface CellModel {
   id: string;
   kind: CellKind;
-  language?: string;
   source: string;
   metadata: CellMetadataModel;
   fingerprint?: string;
@@ -21,7 +20,6 @@ export interface CellModel {
 
 export interface NotebookMetadataModel {
   appVersion?: string;
-  notebookType?: "sql" | "md" | "python" | string;
 }
 
 export interface NotebookModel {

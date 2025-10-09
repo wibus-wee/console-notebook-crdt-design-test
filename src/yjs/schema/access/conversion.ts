@@ -4,7 +4,6 @@ import {
   CELL_FINGERPRINT,
   CELL_ID,
   CELL_KIND,
-  CELL_LANG,
   CELL_META,
   CELL_SOURCE,
   NB_DATABASE_ID,
@@ -42,11 +41,10 @@ export const yCellToModel = (c: YCell): CellModel => {
   if (typeof rawKind !== "string") {
     console.warn(`Cell kind is not a string for id ${id}`);
   }
-  const languageValue = c.get(CELL_LANG);
+  
   return {
     id,
     kind,
-    language: typeof languageValue === "string" ? languageValue : undefined,
     source: src,
     metadata,
     fingerprint: c.get(CELL_FINGERPRINT) ?? undefined,
@@ -59,7 +57,6 @@ export const yNotebookToModel = (nb: YNotebook): NotebookModel => {
   const metaY = nb.get(NB_METADATA) as Y.Map<any> | undefined;
   const metadata: NotebookMetadataModel = {
     appVersion: metaY?.get("appVersion") ?? undefined,
-    notebookType: metaY?.get("notebookType") ?? undefined,
   };
   const rawId = nb.get(NB_ID);
   const id = typeof rawId === "string" ? rawId : String(rawId ?? "");

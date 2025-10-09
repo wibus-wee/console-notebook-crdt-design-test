@@ -5,7 +5,6 @@ import {
   CELL_FINGERPRINT,
   CELL_ID,
   CELL_KIND,
-  CELL_LANG,
   CELL_META,
   CELL_SOURCE,
 } from "../core/keys";
@@ -43,7 +42,6 @@ export const createCell = (init: Partial<CellModel> & { kind: CellKind }): YCell
   const c = new Y.Map<any>();
   c.set(CELL_ID, init.id ?? ulid());
   c.set(CELL_KIND, init.kind);
-  if (init.language) c.set(CELL_LANG, init.language);
 
   const text = new Y.Text();
   text.insert(0, init?.source ?? "");
