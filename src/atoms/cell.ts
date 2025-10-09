@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import { jotaiStore } from '@/lib/jotai'
-import { shouldIgnoreByOrigin, withUserAction } from '@/yjs/bridge/jotai'
+import { withUserAction } from '@/yjs/bridge/jotai'
 import { notebookRootAtom } from '@/atoms/notebook'
 import { getCell } from '@/yjs/schema/access/accessors'
 import { CELL_LANG, CELL_META, CELL_SOURCE } from '@/yjs/schema/core/keys'
@@ -14,8 +14,8 @@ import type { CellMetadataModel } from '@/yjs/schema/core/types'
  * Pattern used across atoms:
  * - onMount: subscribe Yjs (observe) → sync snapshot into a Jotai base atom
  * - read: return latest snapshot from the base atom
- * - write: perform Yjs mutations inside withUserAction to tag origin and avoid echo loops
- * - filter: ignore transactions with shouldIgnoreByOrigin to prevent redundant updates
+ * - write: perform Yjs mutations inside withUserAction to tag origin for undo grouping
+ * - observe all transactions (local & remote) to ensure UI always reflects the Y state
  */
 
 
@@ -74,9 +74,8 @@ export const cellMetadataAtom = atomFamily((id: string) => {
       }
       set(next)
     }
-    const obs = (_evt: any, tx: Y.Transaction) => {
-      // Avoid echo updates triggered by our own withUserAction writes (or other ignored origins).
-      if (shouldIgnoreByOrigin(tx)) return
+    const obs = (_evt: any, _tx: Y.Transaction) => {
+      // Reflect all Yjs transactions (local & remote) into the snapshot
       sync()
     }
     sync()
@@ -120,8 +119,8 @@ export const cellLanguageAtom = atomFamily((id: string) => {
     }
     // Keep local atom in sync with the Y.Map scalar value.
     const sync = () => set((c.get(CELL_LANG) as string | undefined) ?? undefined)
-    const obs = (_evt: any, tx: Y.Transaction) => {
-      if (shouldIgnoreByOrigin(tx)) return
+    const obs = (_evt: any, _tx: Y.Transaction) => {
+      // Reflect all Yjs transactions (local & remote) into the snapshot
       sync()
     }
     sync()
@@ -164,8 +163,8 @@ export const cellContentAtom = atomFamily((id: string) => {
     }
     // Sync local snapshot from Y.Text; observe changes and filter by origin.
     const sync = () => set(t.toString())
-    const obs = (_evt: any, tx: Y.Transaction) => {
-      if (shouldIgnoreByOrigin(tx)) return
+    const obs = (_evt: any, _tx: Y.Transaction) => {
+      // Reflect all Yjs transactions (local & remote) into the snapshot
       sync()
     }
     sync()
@@ -193,8 +192,7 @@ export const cellTextAtom = atomFamily((id: string) => {
       return
     }
     const sync = () => set(getCellText(id))
-    const obs = (_evt: any, tx: Y.Transaction) => {
-      if (shouldIgnoreByOrigin(tx)) return
+    const obs = (_evt: any, _tx: Y.Transaction) => {
       // Only updates when CELL_SOURCE ref changes (not on text edits).
       sync()
     }

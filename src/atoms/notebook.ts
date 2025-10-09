@@ -1,7 +1,6 @@
 import * as Y from 'yjs'
 import { atom } from 'jotai'
 import { jotaiStore } from '@/lib/jotai'
-import { shouldIgnoreByOrigin } from '@/yjs/bridge/jotai'
 import {
   ensureNotebookInDoc,
 } from '@/yjs/schema/bootstrap'
@@ -44,8 +43,8 @@ cellsOrderAtom.onMount = (set) => {
   }
   const order = getOrder(nb)
   const sync = () => set(order.toArray())
-  const obs = (_evt: any, tx: Y.Transaction) => {
-    if (shouldIgnoreByOrigin(tx)) return
+  const obs = (_evt: any, _tx: Y.Transaction) => {
+    // Reflect all Yjs transactions (local & remote) into the snapshot
     sync()
   }
   sync()
@@ -71,8 +70,8 @@ cellIdsSetAtom.onMount = (set) => {
     map.forEach((_v, k) => s.add(k as any))
     set(s)
   }
-  const obs = (_evt: any, tx: Y.Transaction) => {
-    if (shouldIgnoreByOrigin(tx)) return
+  const obs = (_evt: any, _tx: Y.Transaction) => {
+    // Reflect all Yjs transactions (local & remote) into the snapshot
     sync()
   }
   sync()
