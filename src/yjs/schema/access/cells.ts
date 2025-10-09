@@ -9,9 +9,9 @@ import {
   CELL_SOURCE,
 } from "../core/keys";
 import { type CellKind, type CellModel, DEFAULT_CELL_METADATA, type YCell } from "../core/types";
+import { CELL_ID_GUARD_ORIGIN } from "../core/origins";
 
 const CELL_ID_REGISTRY: WeakMap<YCell, string> = new WeakMap();
-const CELL_ID_GUARD_ORIGIN = Symbol("CELL_ID_GUARD"); // 内部保护（不可撤销）
 
 /** 保护 Cell id 不被后续变更（CRDT 合并后仍保持稳定主键） */
 export const lockCellId = (cell: YCell) => {
