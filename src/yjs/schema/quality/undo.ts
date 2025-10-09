@@ -25,6 +25,7 @@ export const createNotebookUndoManager = (
 
   return new UndoManager(scopes as any, {
     captureTimeout: opts?.captureTimeout ?? 500,
-    trackedOrigins: opts?.trackedOrigins ?? new Set([USER_ACTION_ORIGIN]),
+    // Track both default-null (e.g., editor bindings like y-monaco) and explicit USER_ACTION origin
+    trackedOrigins: opts?.trackedOrigins ?? new Set([null, USER_ACTION_ORIGIN]),
   });
 };
