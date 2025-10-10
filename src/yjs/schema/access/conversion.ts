@@ -26,6 +26,7 @@ import {
   type YCell,
   type YNotebook,
   type YOutputEntry,
+  type YOutputsMap,
 } from "../core/types";
 
 export const yCellToModel = (c: YCell): CellModel => {
@@ -89,7 +90,7 @@ type OutputModel = Omit<CellOutputRecord, "runId">;
 
 /** 将 YNotebook 中的 outputs 区转换为可序列化 JSON 对象 */
 export const yOutputsToModel = (nb: YNotebook): Record<string, OutputModel> => {
-  const outputs = nb.get(NB_OUTPUTS) as YOutputEntry;
+  const outputs = nb.get(NB_OUTPUTS) as YOutputsMap;
   if (!outputs) return {};
 
   const result: Record<string, OutputModel> = {};

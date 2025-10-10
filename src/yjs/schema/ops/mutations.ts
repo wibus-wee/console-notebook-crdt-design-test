@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { USER_ACTION_ORIGIN } from "../core/origins";
-import { CELL_ID, NB_TOMBSTONES, NB_TOMBSTONE_META } from "../core/keys";
+import { CELL_ID, NB_TOMBSTONES, NB_TOMBSTONE_META, NB_OUTPUTS } from "../core/keys";
 import type { YCell, YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { lockCellId } from "../access/cells";
@@ -61,6 +61,10 @@ export const removeCell = (
     tomb?.delete(id);
     const tm = nb.get(NB_TOMBSTONE_META) as Y.Map<unknown> | undefined;
     tm?.delete(id);
+
+    // 同步清理 outputs（若存在）
+    const outputs = nb.get(NB_OUTPUTS) as Y.Map<unknown> | undefined;
+    outputs?.delete(id);
   };
   if (doc) {
     doc.transact(apply, origin);

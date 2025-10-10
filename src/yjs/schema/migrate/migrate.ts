@@ -102,7 +102,7 @@ export const migrateNotebookSchema = (
   if (opts?.autoReconcile) {
     const report = reconcileNotebook(root, opts.reconcile?.notebook);
     const outputsReport = reconcileOutputs(root, opts.reconcile?.outputs);
-    if (report.changed) {
+    if (outputsReport.changed) {
       console.info(
         `[reconcileOutputs] cleaned ${outputsReport.patchStats.deletedCount} invalid entries (${outputsReport.removedOrphans.length} orphans, ${outputsReport.removedInvalid.length} invalid)`
       );
