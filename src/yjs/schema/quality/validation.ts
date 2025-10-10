@@ -1,9 +1,10 @@
 import * as Y from "yjs";
-import { NB_TOMBSTONES } from "../core/keys";
+import { NB_OUTPUTS, NB_TOMBSTONES } from "../core/keys";
 import { CELL_ID, CELL_KIND } from "../core/keys";
-import type { YNotebook, YCell } from "../core/types";
+import type { YNotebook, YCell, YOutputsMap } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { type TombstoneMetaMap, tombstoneMetaMap, isValidTombstoneClock } from "../access/tombstone";
+import type { QueryResponse } from "@/yjs/api-gen-type";
 
 export interface ValidationIssue {
   path: string;
@@ -121,6 +122,97 @@ export const validateNotebook = (nb: YNotebook): ValidationIssue[] => {
       });
     }
   });
+
+  // 4) Outputs 区域检查
+  const outputs = nb.get(NB_OUTPUTS) as YOutputsMap | undefined;
+  if (outputs) {
+    outputs.forEach((entry, id) => {
+      if (typeof id !== "string" || id.length === 0) {
+        issues.push({
+          path: `outputs[${id}]`,
+          level: "error",
+          message: `Invalid output key "${id}"`,
+        });
+        return;
+      }
+
+      // 4.1 关联完整性：outputs 中的 id 必须存在于 cellMap
+      if (!map.has(id)) {
+        issues.push({
+          path: `outputs.${id}`,
+          level: "warning",
+          message: `Output exists for "${id}" but cellMap no longer contains this cell`,
+        });
+      }
+
+      // 4.2 字段类型与结构合法性
+      if (!(entry instanceof Y.Map)) {
+        issues.push({
+          path: `outputs.${id}`,
+          level: "error",
+          message: `Output record for "${id}" is not a Y.Map`,
+        });
+        return;
+      }
+
+      const running = entry.get("running");
+      const stale = entry.get("stale");
+      if (running != null && typeof running !== "boolean") {
+        issues.push({
+          path: `outputs.${id}.running`,
+          level: "warning",
+          message: `"running" should be boolean, got ${typeof running}`,
+        });
+      }
+      if (stale != null && typeof stale !== "boolean") {
+        issues.push({
+          path: `outputs.${id}.stale`,
+          level: "warning",
+          message: `"stale" should be boolean, got ${typeof stale}`,
+        });
+      }
+
+      const startedAt = entry.get("startedAt");
+      const completedAt = entry.get("completedAt");
+      if (startedAt != null && typeof startedAt !== "number") {
+        issues.push({
+          path: `outputs.${id}.startedAt`,
+          level: "warning",
+          message: `"startedAt" should be number (timestamp), got ${typeof startedAt}`,
+        });
+      }
+      if (completedAt != null && typeof completedAt !== "number") {
+        issues.push({
+          path: `outputs.${id}.completedAt`,
+          level: "warning",
+          message: `"completedAt" should be number (timestamp), got ${typeof completedAt}`,
+        });
+      }
+
+      // 4.3 result 结构
+      const result = entry.get("result") as QueryResponse;
+      if (result != null) {
+        const cols = result.columns;
+        const rows = result.rows;
+        const rowsAffected = result.rowsAffected;
+        const hasErr = "error" in result;
+
+        if (!Array.isArray(cols) || !Array.isArray(rows) || typeof rowsAffected !== "number") {
+          issues.push({
+            path: `outputs.${id}.result`,
+            level: "error",
+            message: `Invalid QueryResponse structure for "${id}"`,
+          });
+        } else if (hasErr && typeof result.error !== "string") {
+          issues.push({
+            path: `outputs.${id}.result.error`,
+            level: "warning",
+            message: `"error" field should be string when present`,
+          });
+        }
+      }
+    });
+  }
 
   return issues;
 };

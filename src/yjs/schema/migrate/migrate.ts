@@ -5,6 +5,7 @@ import { ensureSchemaMeta, getNotebookRoot } from "../access/root";
 import { MIGRATION_REGISTRY } from "./registry";
 import { reconcileNotebook, type ReconcileOptions } from "../quality/reconcile";
 import { validateNotebook } from "../quality/validation";
+import { reconcileOutputs, type ReconcileOutputsOptions } from "../quality/reconcile_outputs";
 
 export const migrateNotebookSchema = (
   doc: Y.Doc,
@@ -13,7 +14,10 @@ export const migrateNotebookSchema = (
     /** Feature flag: 迁移完成后（或版本已最新时）自动执行一次 reconcile */
     autoReconcile?: boolean;
     /** 传入给 reconcileNotebook 的细化选项 */
-    reconcile?: ReconcileOptions;
+    reconcile?: {
+      notebook: ReconcileOptions,
+      outputs: ReconcileOutputsOptions
+    };
   }
 ): number => {
   const log = opts?.log ?? console.info;
@@ -26,7 +30,13 @@ export const migrateNotebookSchema = (
   if (currentVersion === SCHEMA_VERSION) {
     log(`[migrate] Schema already up-to-date (v${SCHEMA_VERSION}).`);
     if (opts?.autoReconcile) {
-      const report = reconcileNotebook(root, opts.reconcile);
+      const report = reconcileNotebook(root, opts.reconcile?.notebook);
+      const outputsReport = reconcileOutputs(root, opts.reconcile?.outputs);
+      if (report.changed) {
+        console.info(
+          `[reconcileOutputs] cleaned ${outputsReport.patchStats.deletedCount} invalid entries (${outputsReport.removedOrphans.length} orphans, ${outputsReport.removedInvalid.length} invalid)`
+        );
+      }
       if (report.changed) {
         log(
           `[migrate] Auto-reconcile applied: order ${report.previousOrderLength} → ${report.finalOrderLength}, appended ${report.appendedOrphans.length}, removed dup=${report.removedDuplicates.length}, missing=${report.removedMissingFromMap.length}, tomb=${report.removedTombstoned.length}, invalid=${report.removedInvalid.length}`
@@ -90,7 +100,13 @@ export const migrateNotebookSchema = (
   }
 
   if (opts?.autoReconcile) {
-    const report = reconcileNotebook(root, opts.reconcile);
+    const report = reconcileNotebook(root, opts.reconcile?.notebook);
+    const outputsReport = reconcileOutputs(root, opts.reconcile?.outputs);
+    if (report.changed) {
+      console.info(
+        `[reconcileOutputs] cleaned ${outputsReport.patchStats.deletedCount} invalid entries (${outputsReport.removedOrphans.length} orphans, ${outputsReport.removedInvalid.length} invalid)`
+      );
+    }
     if (report.changed) {
       log(
         `[migrate] Auto-reconcile applied: order ${report.previousOrderLength} → ${report.finalOrderLength}, appended ${report.appendedOrphans.length}, removed dup=${report.removedDuplicates.length}, missing=${report.removedMissingFromMap.length}, tomb=${report.removedTombstoned.length}, invalid=${report.removedInvalid.length}`

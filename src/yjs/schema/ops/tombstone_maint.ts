@@ -4,6 +4,7 @@ import { DEFAULT_FUTURE_SKEW_MS, WALL_CLOCK_EPOCH_FLOOR_MS } from "../core/time"
 import { getOrder, getCellMap } from "../access/accessors";
 import { ensureTombstoneMetaEntry, readTombstoneMetaEntry, tombstoneMetaMap, tombstonesMap } from "../access/tombstone";
 import type { YNotebook } from "../core/types";
+import { NB_OUTPUTS } from "../core/keys";
 
 export interface TombstoneTimestampOptions {
   reason?: string;
@@ -86,6 +87,10 @@ export const vacuumNotebook = (
       map.delete(id);
       tm.delete(id);
       t.delete(id);
+
+      // 同步清理对应 outputs（如果存在）
+      const outputs = nb.get(NB_OUTPUTS);
+      outputs?.delete(id);
     });
   };
 

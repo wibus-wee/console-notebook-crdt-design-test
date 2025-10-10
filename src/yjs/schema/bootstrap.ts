@@ -15,6 +15,7 @@ import type { NotebookModel, YNotebook } from "./core/types";
 import { ensureNotebookRoot } from "./access/root";
 import { getCellMap, getOrder } from "./access/accessors";
 import { lockCellId } from "./access/cells";
+import { enableAutoStaleOnSource } from "./quality/auto_stale";
 
 // Creation & Initialization
 export const ensureNotebookInDoc = (doc: Y.Doc, init?: Partial<NotebookModel>): YNotebook => {
@@ -60,6 +61,11 @@ export const ensureNotebookInDoc = (doc: Y.Doc, init?: Partial<NotebookModel>): 
   // tombstones
   if (!root.has(NB_TOMBSTONES)) root.set(NB_TOMBSTONES, new Y.Map<boolean>());
   if (!root.has(NB_TOMBSTONE_META)) root.set(NB_TOMBSTONE_META, new Y.Map<any>());
+  
+  // outputs
+  // 职责边界调整：不在 bootstrap 阶段强制创建 NB_OUTPUTS。
+  // - 对于“新文档”：建议在引导后立刻运行迁移（migrateNotebookSchema），由迁移保证结构齐备；
+  // - 对于“运行时访问”：通过 access/outputs 的 getOutputsMap/ensureOutputEntry 懒建，避免不必要的写入。
 
   // optional seed for order
   if (init?.order?.length) {
@@ -77,8 +83,10 @@ export const ensureNotebookInDoc = (doc: Y.Doc, init?: Partial<NotebookModel>): 
 
   const cellMap = root.get(NB_CELL_MAP) as Y.Map<any> | undefined;
   cellMap?.forEach((cell: any) => {
-    if (cell instanceof Y.Map) lockCellId(cell as any);
+    if (cell instanceof Y.Map) lockCellId(cell as any); // lock cell id
   });
+
+  enableAutoStaleOnSource(root); // 启用自动 stale 功能
 
   return root as any;
 };

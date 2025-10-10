@@ -11,6 +11,7 @@ export * from "./access/accessors";
 export * from "./access/cells";
 export * from "./access/tombstone";
 export * from "./access/conversion";
+export * from "./access/outputs";
 
 // Operations
 export * from "./ops/mutations";
@@ -21,6 +22,7 @@ export * from "./ops/tombstone_maint";
 export * from "./quality/undo";
 export * from "./quality/validation";
 export * from "./quality/reconcile";
+export * from "./quality/auto_stale";
 
 // Bootstrap
 export * from "./bootstrap";
@@ -28,7 +30,6 @@ export * from "./bootstrap";
 // Migration framework
 export * from "./migrate/registry";
 export * from "./migrate/migrate";
-
-// Ensure example migrations register at module load (side-effect import)
-// import "./migrate/examples";
+// import all built-in migrations to register them
+import "./migrate/v1_000_000_v1_000_001";
 

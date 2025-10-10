@@ -13,16 +13,19 @@ import {
   NB_TITLE,
   NB_CELL_ORDER,
   NB_TOMBSTONES,
+  NB_OUTPUTS,
 } from "../core/keys";
 import {
   type CellKind,
   type CellMetadataModel,
   type CellModel,
+  type CellOutputRecord,
   DEFAULT_CELL_METADATA,
   type NotebookMetadataModel,
   type NotebookModel,
   type YCell,
   type YNotebook,
+  type YOutputEntry,
 } from "../core/types";
 
 export const yCellToModel = (c: YCell): CellModel => {
@@ -82,3 +85,52 @@ export const yNotebookToModel = (nb: YNotebook): NotebookModel => {
   };
 };
 
+type OutputModel = Omit<CellOutputRecord, "runId">;
+
+/** 将 YNotebook 中的 outputs 区转换为可序列化 JSON 对象 */
+export const yOutputsToModel = (nb: YNotebook): Record<string, OutputModel> => {
+  const outputs = nb.get(NB_OUTPUTS) as YOutputEntry;
+  if (!outputs) return {};
+
+  const result: Record<string, OutputModel> = {};
+
+  outputs.forEach((entry, id) => {
+    if (!(entry instanceof Y.Map)) return; // skip invalid
+    if (typeof id !== "string" || id.length === 0) return;
+
+    const out: OutputModel = {
+      running: false,
+      stale: false,
+    };
+    const running = entry.get("running");
+    const stale = entry.get("stale");
+    const startedAt = entry.get("startedAt");
+    const completedAt = entry.get("completedAt");
+    const qres = entry.get("result");
+
+    if (typeof running === "boolean") out.running = running;
+    if (typeof stale === "boolean") out.stale = stale;
+    if (typeof startedAt === "number") out.startedAt = startedAt;
+    if (typeof completedAt === "number") out.completedAt = completedAt;
+
+    // result 对象结构容忍性转换
+    if (
+      qres &&
+      typeof qres === "object" &&
+      Array.isArray(qres.columns) &&
+      Array.isArray(qres.rows) &&
+      typeof qres.rowsAffected === "number"
+    ) {
+      out.result = {
+        columns: qres.columns,
+        rows: qres.rows,
+        rowsAffected: qres.rowsAffected,
+        ...(typeof qres.error === "string" ? { error: qres.error } : {}),
+      };
+    }
+
+    result[id] = out;
+  });
+
+  return result;
+};
