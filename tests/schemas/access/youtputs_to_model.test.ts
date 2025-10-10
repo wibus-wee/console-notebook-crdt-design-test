@@ -26,7 +26,6 @@ describe("yOutputsToModel", () => {
     expect(model[id].stale).toBe(false);
     expect(model[id].startedAt).toBe(1);
     expect(model[id].completedAt).toBe(2);
-    // @ts-expect-error runId is intentionally omitted
     expect((model[id] as any).runId).toBeUndefined();
     expect(model[id].result?.rowsAffected).toBe(7);
     expect(model[id].result?.error).toBe("boom");
