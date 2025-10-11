@@ -4,6 +4,7 @@ import { CELL_ID, NB_TOMBSTONES, NB_TOMBSTONE_META, NB_OUTPUTS } from "../core/k
 import type { YCell, YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { lockCellId } from "../access/cells";
+import { withTransactOptional } from "../core/transaction";
 
 /** 在指定位置插入 cell（省略 index 则 append） */
 export const insertCell = (
@@ -12,7 +13,6 @@ export const insertCell = (
   index?: number,
   origin: symbol = USER_ACTION_ORIGIN
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const id = cell.get(CELL_ID) as string;
   if (typeof id !== "string" || !id) throw new Error("Cell must have a valid id");
 
@@ -34,11 +34,8 @@ export const insertCell = (
     if (target > len) target = len;
     order.insert(target, [id]);
   };
-  if (doc) {
-    doc.transact(apply, origin);
-  } else {
-    apply();
-  }
+
+  withTransactOptional(nb, apply, origin);
 };
 
 /** 根据 cellId 删除（硬删除：从 order 和 map 同步移除；软删除请用 softDeleteCell） */
@@ -47,7 +44,6 @@ export const removeCell = (
   id: string,
   origin: symbol = USER_ACTION_ORIGIN
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const apply = () => {
     const order = getOrder(nb);
     const map = getCellMap(nb);
@@ -66,11 +62,7 @@ export const removeCell = (
     const outputs = nb.get(NB_OUTPUTS) as Y.Map<unknown> | undefined;
     outputs?.delete(id);
   };
-  if (doc) {
-    doc.transact(apply, origin);
-  } else {
-    apply();
-  }
+  withTransactOptional(nb, apply, origin);
 };
 
 /** 移动 cell 到新位置（稳定基于 id） */
@@ -80,7 +72,6 @@ export const moveCell = (
   toIndex: number,
   origin: symbol = USER_ACTION_ORIGIN
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const apply = () => {
     const order = getOrder(nb);
     const arr = order.toArray();
@@ -97,9 +88,5 @@ export const moveCell = (
     if (target > newLen) target = newLen;
     order.insert(target, [id]);
   };
-  if (doc) {
-    doc.transact(apply, origin);
-  } else {
-    apply();
-  }
+  withTransactOptional(nb, apply, origin);
 };

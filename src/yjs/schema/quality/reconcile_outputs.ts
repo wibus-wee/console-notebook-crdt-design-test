@@ -4,6 +4,7 @@ import { NB_OUTPUTS } from "../core/keys";
 import type { YNotebook } from "../core/types";
 import { getCellMap } from "../access/accessors";
 import { validateNotebook, type ValidationIssue } from "./validation";
+import { withTransactOptional } from "../core/transaction";
 
 export interface ReconcileOutputsOptions {
   /** 移除 cellMap 不存在的孤立 outputs */
@@ -77,13 +78,11 @@ export const reconcileOutputs = (
 
   const willDelete = removedOrphans.length + removedInvalid.length > 0;
   if (willDelete) {
-    const doc = nb.doc as Y.Doc | undefined;
     const apply = () => {
       for (const id of removedInvalid) outputs.delete(id);
       for (const id of removedOrphans) outputs.delete(id);
     };
-    if (doc) doc.transact(apply, MAINT_ORIGIN);
-    else apply();
+    withTransactOptional(nb, apply, MAINT_ORIGIN);
   }
 
   const afterCount = outputs.size;

@@ -4,6 +4,7 @@ import { EXECUTION_ORIGIN } from "../core/origins";
 import type { YNotebook } from "../core/types";
 import { getOutputsMap, ensureOutputEntry } from "../access/outputs";
 import type { QueryResponse } from "../../api-gen-type";
+import { withTransactOptional } from "../core/transaction";
 
 /** 启动执行：重置并标记 running=true */
 export const startExecuteCell = (
@@ -11,7 +12,6 @@ export const startExecuteCell = (
   cellId: string,
   opts?: { now?: number }
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const apply = () => {
     const entry = ensureOutputEntry(nb, cellId);
     const runId = ulid();
@@ -24,8 +24,7 @@ export const startExecuteCell = (
     entry.set("runId", runId);
     entry.delete("completedAt");
   };
-  if (doc) doc.transact(apply, EXECUTION_ORIGIN);
-  else apply();
+  withTransactOptional(nb, apply, EXECUTION_ORIGIN);
 };
 
 /** 应用执行结果（完全覆盖旧 result） */
@@ -43,7 +42,6 @@ export const applyExecuteResult = (
     clearRunId?: boolean;
   }
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const apply = () => {
     const outputs = getOutputsMap(nb);
     const entry = outputs.get(cellId);
@@ -74,8 +72,7 @@ export const applyExecuteResult = (
     const shouldClear = opts?.clearRunId ?? true;
     if (shouldClear) entry.delete("runId");
   };
-  if (doc) doc.transact(apply, EXECUTION_ORIGIN);
-  else apply();
+  withTransactOptional(nb, apply, EXECUTION_ORIGIN);
 };
 
 /**
@@ -101,13 +98,11 @@ export const markCellOutputStale = (
   cellId: string,
   opts?: { origin?: symbol }
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
   const apply = () => {
     const outputs = getOutputsMap(nb);
     const entry = outputs.get(cellId);
     if (!entry) return;
     entry.set("stale", true);
   };
-  if (doc) doc.transact(apply, opts?.origin ?? EXECUTION_ORIGIN);
-  else apply();
+  withTransactOptional(nb, apply, opts?.origin ?? EXECUTION_ORIGIN);
 };

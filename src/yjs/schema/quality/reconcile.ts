@@ -4,6 +4,13 @@ import type { YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { tombstonesMap } from "../access/tombstone";
 import { validateNotebook, type ValidationIssue } from "./validation";
+import { withTransactOptional } from "../core/transaction";
+
+/** Delete range in the order array */
+export interface DeleteRange {
+  start: number;
+  len: number;
+}
 
 export interface ReconcileOptions {
   /** Append orphan cells (present in map, missing in order) to the end */
@@ -37,43 +44,59 @@ export interface ReconcileReport {
   validationIssues?: ValidationIssue[];
 }
 
-export const reconcileNotebook = (
-  nb: YNotebook,
+/**
+ * Normalize reconcile options with defaults.
+ */
+export const resolveReconcileOptions = (
   opts?: ReconcileOptions
-): ReconcileReport => {
-  const options: Required<ReconcileOptions> = {
-    appendOrphans: opts?.appendOrphans ?? true,
-    sortOrphansById: opts?.sortOrphansById ?? true,
-    dropTombstonedFromOrder: opts?.dropTombstonedFromOrder ?? true,
-    dropInvalidOrderEntries: opts?.dropInvalidOrderEntries ?? true,
-    validateAfter: opts?.validateAfter ?? false,
-  };
+): Required<ReconcileOptions> => ({
+  appendOrphans: opts?.appendOrphans ?? true,
+  sortOrphansById: opts?.sortOrphansById ?? true,
+  dropTombstonedFromOrder: opts?.dropTombstonedFromOrder ?? true,
+  dropInvalidOrderEntries: opts?.dropInvalidOrderEntries ?? true,
+  validateAfter: opts?.validateAfter ?? false,
+});
 
-  const order = getOrder(nb);
-  const map = getCellMap(nb);
-  const tomb = tombstonesMap(nb);
-
+/**
+ * Build a set of tombstoned ids from the tombstone map.
+ */
+export const buildTombstoneSet = (tomb?: Y.Map<boolean>): Set<string> => {
   const tombSet = new Set<string>();
   tomb?.forEach((flag, id) => {
     if (flag) tombSet.add(id);
   });
+  return tombSet;
+};
 
-  // snapshot for computation only (we will apply minimal patch)
-  const before = order.toArray();
-  const mapHas = (id: string) => map.has(id);
+export interface ClassificationResult {
+  kept: string[];
+  indexesToDelete: number[];
+  removedMissingFromMap: string[];
+  removedTombstoned: string[];
+  removedDuplicates: string[];
+  removedInvalid: string[];
+}
 
+/**
+ * Classify the current order entries, producing kept ids and the delete index list,
+ * while recording removal reasons for reporting.
+ */
+export const classifyOrderEntries = (
+  orderSnapshot: any[],
+  options: Required<ReconcileOptions>,
+  mapHas: (id: string) => boolean,
+  tombSet: Set<string>
+): ClassificationResult => {
   const seen = new Set<string>();
   const removedMissingFromMap: string[] = [];
   const removedTombstoned: string[] = [];
   const removedDuplicates: string[] = [];
   const removedInvalid: string[] = [];
   const kept: string[] = [];
-
-  // collect indexes to delete (minimal diffs)
   const indexesToDelete: number[] = [];
 
-  for (let i = 0; i < before.length; i += 1) {
-    const raw = before[i] as any;
+  for (let i = 0; i < orderSnapshot.length; i += 1) {
+    const raw = orderSnapshot[i] as any;
 
     // Always drop non-string entries
     if (typeof raw !== "string") {
@@ -119,51 +142,106 @@ export const reconcileNotebook = (
     kept.push(raw);
   }
 
-  // Determine orphans to append
-  const keptSet = new Set<string>(kept);
-  const orphans: string[] = [];
-  if (options.appendOrphans) {
-    map.forEach((_cell, id) => {
-      if (!keptSet.has(id) && !tombSet.has(id)) orphans.push(id);
-    });
-    if (options.sortOrphansById) orphans.sort();
-  }
+  return {
+    kept,
+    indexesToDelete,
+    removedMissingFromMap,
+    removedTombstoned,
+    removedDuplicates,
+    removedInvalid,
+  };
+};
 
-  // Compress deletions into ranges (minimal number of delete ops)
-  indexesToDelete.sort((a, b) => a - b);
-  const deleteRanges: Array<{ start: number; len: number }> = [];
+/**
+ * Collect orphan ids (present in map but not in kept and not tombstoned).
+ */
+export const findOrphansToAppend = (
+  map: Y.Map<any>,
+  keptSet: Set<string>,
+  tombSet: Set<string>,
+  options: Required<ReconcileOptions>
+): string[] => {
+  const orphans: string[] = [];
+  if (!options.appendOrphans) return orphans;
+  map.forEach((_cell, id) => {
+    if (!keptSet.has(id) && !tombSet.has(id)) orphans.push(id);
+  });
+  if (options.sortOrphansById) orphans.sort();
+  return orphans;
+};
+
+/**
+ * Compress a sorted list of indexes to delete into contiguous ranges.
+ */
+export const mergeDeleteIndexesToRanges = (indexesToDelete: number[]): DeleteRange[] => {
+  if (indexesToDelete.length === 0) return [];
+  const idxs = [...indexesToDelete].sort((a, b) => a - b);
+  const ranges: DeleteRange[] = [];
   let rangeStart: number | null = null;
   let prev: number | null = null;
-  for (const idx of indexesToDelete) {
+  for (const idx of idxs) {
     if (rangeStart == null) {
       rangeStart = idx;
       prev = idx;
     } else if (prev != null && idx === prev + 1) {
       prev = idx;
     } else {
-      deleteRanges.push({ start: rangeStart, len: (prev! - rangeStart) + 1 });
+      ranges.push({ start: rangeStart, len: prev! - rangeStart + 1 });
       rangeStart = idx;
       prev = idx;
     }
   }
-  if (rangeStart != null) deleteRanges.push({ start: rangeStart, len: (prev! - rangeStart) + 1 });
+  if (rangeStart != null) ranges.push({ start: rangeStart, len: prev! - rangeStart + 1 });
+  return ranges;
+};
 
+/**
+ * Apply minimal patch to the Y.Array order: delete ranges and append orphans.
+ */
+export const applyOrderPatch = (
+  nb: YNotebook,
+  order: Y.Array<string>,
+  deleteRanges: DeleteRange[],
+  orphans: string[]
+) => {
   const willDelete = deleteRanges.length > 0;
   const willAppend = orphans.length > 0;
-  const changed = willDelete || willAppend;
+  if (!willDelete && !willAppend) return;
+
+  const apply = () => {
+    // apply deletions from end to start to keep indices valid
+    for (let i = deleteRanges.length - 1; i >= 0; i -= 1) {
+      const { start, len } = deleteRanges[i]!;
+      if (len > 0) order.delete(start, len);
+    }
+    if (willAppend) order.push(orphans);
+  };
+  withTransactOptional(nb, apply, MAINT_ORIGIN);
+};
+
+export const reconcileNotebook = (
+  nb: YNotebook,
+  opts?: ReconcileOptions
+): ReconcileReport => {
+  const options = resolveReconcileOptions(opts);
+
+  const order = getOrder(nb);
+  const map = getCellMap(nb);
+  const tomb = tombstonesMap(nb);
+  const tombSet = buildTombstoneSet(tomb);
+
+  // snapshot for computation only (we will apply minimal patch)
+  const before = order.toArray();
+  const classification = classifyOrderEntries(before, options, (id) => map.has(id), tombSet);
+
+  const keptSet = new Set<string>(classification.kept);
+  const orphans = findOrphansToAppend(map, keptSet, tombSet, options);
+
+  const deleteRanges = mergeDeleteIndexesToRanges(classification.indexesToDelete);
+  const changed = deleteRanges.length > 0 || orphans.length > 0;
 
   if (changed) {
-    const doc = (nb as any).doc as Y.Doc | undefined;
-    const apply = () => {
-      // apply deletions from end to start to keep indices valid
-      for (let i = deleteRanges.length - 1; i >= 0; i -= 1) {
-        const { start, len } = deleteRanges[i];
-        if (len > 0) order.delete(start, len);
-      }
-      if (willAppend) order.push(orphans);
-    };
-    if (doc) doc.transact(apply, MAINT_ORIGIN);
-    else apply();
+    applyOrderPatch(nb, order, deleteRanges, orphans);
   }
 
   const finalLen = changed ? order.length : before.length; // minimal overhead read
@@ -180,10 +258,10 @@ export const reconcileNotebook = (
     changed,
     previousOrderLength: before.length,
     finalOrderLength: finalLen,
-    removedMissingFromMap,
-    removedTombstoned,
-    removedDuplicates,
-    removedInvalid,
+    removedMissingFromMap: classification.removedMissingFromMap,
+    removedTombstoned: classification.removedTombstoned,
+    removedDuplicates: classification.removedDuplicates,
+    removedInvalid: classification.removedInvalid,
     appendedOrphans: orphans,
     patchStats,
     validationIssues,

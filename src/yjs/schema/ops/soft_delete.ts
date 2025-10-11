@@ -5,6 +5,7 @@ import { getOrder, getCellMap } from "../access/accessors";
 import { tombstonesMap, tombstoneMetaMap, ensureTombstoneMetaEntry, type TombstoneMetaMap } from "../access/tombstone";
 import type { YNotebook } from "../core/types";
 import { NB_TOMBSTONES, NB_TOMBSTONE_META } from "../core/keys";
+import { withTransactOptional } from "../core/transaction";
 
 export interface SoftDeleteOptions {
   timestamp?: number;
@@ -19,8 +20,6 @@ export const softDeleteCell = (
   reason?: string,
   opts?: SoftDeleteOptions
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
-
   const resolve = (): { ts?: number; clock?: "trusted" | "local" } => {
     const cs = opts?.clock ?? systemClock;
     const hasTs = opts?.timestamp != null;
@@ -50,11 +49,7 @@ export const softDeleteCell = (
     if (clock) entry.set("clock", clock);
   };
 
-  if (doc) {
-    doc.transact(apply, USER_ACTION_ORIGIN);
-  } else {
-    apply();
-  }
+  withTransactOptional(nb, apply, USER_ACTION_ORIGIN);
 };
 
 /** 恢复软删除：清除 tombstone 并按指定位置重新注入 order */
@@ -64,8 +59,6 @@ export const restoreCell = (
   index?: number,
   origin: symbol = USER_ACTION_ORIGIN
 ) => {
-  const doc = nb.doc as Y.Doc | undefined;
-
   const apply = () => {
     const map = getCellMap(nb);
     const cell = map.get(cellId);
@@ -90,9 +83,5 @@ export const restoreCell = (
     tm?.delete(cellId);
   };
 
-  if (doc) {
-    doc.transact(apply, origin);
-  } else {
-    apply();
-  }
+  withTransactOptional(nb, apply, origin);
 };

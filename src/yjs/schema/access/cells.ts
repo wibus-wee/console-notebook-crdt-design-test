@@ -10,6 +10,7 @@ import {
 } from "../core/keys";
 import { type CellKind, type CellModel, DEFAULT_CELL_METADATA, type YCell } from "../core/types";
 import { CELL_ID_GUARD_ORIGIN } from "../core/origins";
+import { withTransactOptional } from "../core/transaction";
 
 const CELL_ID_REGISTRY: WeakMap<YCell, string> = new WeakMap();
 
@@ -27,13 +28,8 @@ export const lockCellId = (cell: YCell) => {
     if (!locked) return;
     const current = cell.get(CELL_ID);
     if (current === locked) return;
-    const doc = cell.doc as Y.Doc | undefined;
     const reset = () => cell.set(CELL_ID, locked);
-    if (doc) {
-      doc.transact(reset, CELL_ID_GUARD_ORIGIN);
-    } else {
-      reset();
-    }
+    withTransactOptional(cell, reset, CELL_ID_GUARD_ORIGIN);
   });
 };
 

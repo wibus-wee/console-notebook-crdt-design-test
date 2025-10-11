@@ -25,7 +25,6 @@ import {
   type NotebookModel,
   type YCell,
   type YNotebook,
-  type YOutputEntry,
   type YOutputsMap,
 } from "../core/types";
 
