@@ -49,6 +49,7 @@ const MonacoEditor = memo(function MonacoEditor({
   ref,
 }: MonacoEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const contentSizeDisposableRef = useRef<editor.IDisposable | null>(null);
   const [editorHeight, setEditorHeight] = useState<number>(
     typeof height === 'number' ? height : 200
   );
@@ -57,6 +58,9 @@ const MonacoEditor = memo(function MonacoEditor({
     return () => {
       // Cleanup editor instance when component unmounts
       if (editorRef.current) {
+        // dispose attached content-size listener explicitly
+        try { contentSizeDisposableRef.current?.dispose(); } catch {}
+        contentSizeDisposableRef.current = null;
         editorRef.current.dispose();
         editorRef.current = null;
       }
@@ -77,17 +81,8 @@ const MonacoEditor = memo(function MonacoEditor({
 
   useEffect(() => {
     if (autoResize && editorRef.current) {
-      // Update height when value changes
+      // Update height when value changes without re-attaching listeners
       updateHeight();
-      
-      // Listen to content size changes
-      const disposable = editorRef.current.onDidContentSizeChange(() => {
-        updateHeight();
-      });
-
-      return () => {
-        disposable.dispose();
-      };
     }
   }, [value, autoResize, updateHeight]);
 
@@ -98,9 +93,9 @@ const MonacoEditor = memo(function MonacoEditor({
       if (autoResize) {
         // Initial height update
         updateHeight();
-
-        // Listen to content size changes
-        editor.onDidContentSizeChange(() => {
+        // Ensure only a single listener exists
+        try { contentSizeDisposableRef.current?.dispose(); } catch {}
+        contentSizeDisposableRef.current = editor.onDidContentSizeChange(() => {
           updateHeight();
         });
       }

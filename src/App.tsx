@@ -1,15 +1,17 @@
 import './App.css'
-import { Provider } from 'jotai'
-import { jotaiStore } from './lib/jotai'
+import { NotebookView } from './components/in-page/NotebookView'
+import { NotebookProvider } from './providers/NotebookProvider'
 
-function App() {
+export default function App() {
   return (
-    <>
-      <Provider store={jotaiStore}>
-
-      </Provider>
-    </>
+    <NotebookProvider
+      room="demo-notebook-room"
+      serverUrl="ws://localhost:1234"
+    >
+      <div className="p-4 flex flex-col gap-2">
+        <h2 className="font-bold">协同 Notebook 示例</h2>
+        <NotebookView />
+      </div>
+    </NotebookProvider>
   )
 }
-
-export default App

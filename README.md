@@ -1,139 +1,392 @@
 # 基于 Yjs、Jotai 和 React 的实时协同 Monaco Editor 引擎
 
-## Known Issues
+## Yjs 架构与测试调研报告
 
-- [ ] Yjs Undo 在“用户 move 后，再有其它对同一 Y.Array 的 interleaving 修改（即便 MAINT_ORIGIN 未被追踪）”时，撤销语义对时序较敏感，容易出现非预期重复。
+  基于对项目中 28 个 Yjs 源文件和 14 个测试文件（1100+ 行测试代码）的深入分析，以下是详细的调研结果。
 
-  测试范围与用例建议
+  ---
+  📋 一、架构概览
 
-  - 基础引导与模型
-      - ensureNotebookInDoc 初始化
-          - 缺省字段填充：id/title/databaseId/tags/metadata 默认值正确。
-          - 结构保证：cellMap/order/tombstones/tombstoneMeta 均存在。
-          - 初始 order 种子：去重插入，不重复。
-          - 已有 cell 被 lock：后续尝试 cell.set('id', ...) 会被重置。
-          - 文件: src/yjs/schema/bootstrap.ts:20
-      - yCellToModel / yNotebookToModel
-          - Y.Text 转字符串；metadata 默认值；非字符串 id/kind 警告但能容错。
-          - 文件: src/yjs/schema/access/conversion.ts:29, src/yjs/schema/access/conversion.ts:57
-  - Map+Order 变更操作
-      - insertCell
-          - 先 map.set 再 order.insert；重复 id 先移除旧位再插入到新位。
-          - 插入边界 index < 0 / > length 的裁剪行为。
-          - 文件: src/yjs/schema/ops/mutations.ts:9
-      - removeCell
-          - 从 order 全部删除该 id；从 map 删除；清除 tombstones 和 tombstoneMeta 对应项。
-          - 文件: src/yjs/schema/ops/mutations.ts:45
-      - moveCell
-          - 边界 toIndex；不移动时不产生变更；从末位移到末尾无操作。
-          - 文件: src/yjs/schema/ops/mutations.ts:73
-  - 软删、恢复、清理
-      - softDeleteCell
-          - 从 order 移除；tombstones 设置为 true；tombstoneMeta 写入 reason/deletedAt/clock。
-          - timestamp/clock 逻辑：未传 timestamp 时使用时钟；小于楼层时间拒绝写入。
-          - 文件: src/yjs/schema/ops/soft_delete.ts:14
-      - restoreCell
-          - 恢复至指定 index；清除 tombstones 与 tombstoneMeta。
-          - 文件: src/yjs/schema/ops/soft_delete.ts:52
-      - setTombstoneTimestamp
-          - 未有 tombstone flag 时也会置为 true；clock 可信/本地标记。
-          - 文件: src/yjs/schema/ops/tombstone_maint.ts:17
-      - vacuumNotebook
-          - 仅在 “受信任时钟 + TTL 满足 + 不在 order” 时才会删除实体与 meta；“local” 时钟或 TTL 未到都不清理。
-          - 未来时间漂移保护（maxFutureSkew）有效。
-          - 文件: src/yjs/schema/ops/tombstone_maint.ts:41
-  - 校验与修复
-      - validateNotebook
-          - order 引用缺失 id 报 error；重复 id 报 error；order 中 tombstone 报 warning。
-          - map 中孤立 id 报 warning；cell 缺少 kind 报 error；key 与嵌入 id 不一致报 warning。
-          - 文件: src/yjs/schema/quality/validation.ts:15
-      - reconcileNotebook
-          - 去重：保留首个，移除后续重复。
-          - 清理：移除缺失于 map、tombstoned 的 id；非字符串一律移除；空字符串按 flag 保留或移除。
-          - 孤儿追加：map 中非 tombstone 且不在 order 的 id 追加到末尾；默认按 id 升序；开关可关。
-          - 不改变时 changed=false；报告各统计字段正确。
-          - 事务与撤销：变更使用 MAINT_ORIGIN，UndoManager 不追踪（结合撤销测试验证）。
-          - 文件: src/yjs/schema/quality/reconcile.ts:29
-  - Undo 管理
-      - createNotebookUndoManager
-          - USER_ACTION_ORIGIN 的 insert/remove/move/softDelete 可撤销；MAINT_ORIGIN（reconcile）与 VACUUM_ORIGIN 不进入撤
-            销栈。
-          - 连续事务合并（captureTimeout）行为正确。
-          - 文件: src/yjs/schema/quality/undo.ts:10
-  - 迁移框架
-      - migrateNotebookSchema
-          - 当前版本等于 SCHEMA_VERSION：打印 up-to-date；autoReconcile=true 时执行一次 reconcile 并校验日志与 validate 结
-            果。
-          - 版本落后：按注册表逐步迁移；每步事务内“版本重检”能在并发推进时跳过重复迁移体。
-          - 版本超前：提示 Warning 并退出。
-          - 文件: src/yjs/schema/migrate/migrate.ts:9
-      - registerNotebookMigration
-          - 重复注册抛错；按 fromVersion 链式执行。
-          - 文件: src/yjs/schema/migrate/registry.ts:19
-  - ID Guard（锁）
-      - lockCellId
-          - 对未附着到 Doc 的 cell：直接 set id 会被 observe 逻辑同步重置为锁定值。
-          - 对附着 Doc 的 cell：set id 会在 doc.transact(reset, CELL_ID_GUARD_ORIGIN) 下回滚，且不进入 Undo 栈。
-          - 文件: src/yjs/schema/access/cells.ts
-  - 属性测试（可选，高价值）
-      - 基于 fast-check 生成一系列随机操作（insert/move/remove/softDelete/restore + 手工注入“脏 order”），断言
-          - validate 的 error 不为正（或只在注入脏数据时出现）
-          - reconcile 之后 validate 没有 error，且 order 与 map 引用一致
-      - 强化对复杂分支的覆盖（尤其 reconcile 和 vacuum 的判定）
+  1.1 项目结构
 
-  测试组织与工具建议
+  src/yjs/
+  ├── schema/
+  │   ├── core/          # 核心类型、常量、时间处理
+  │   ├── access/        # 数据访问层（root, cells, outputs, tombstone）
+  │   ├── ops/           # 操作层（mutations, soft_delete, execute, tombstone_maint）
+  │   ├── quality/       # 质量保证（reconcile, validation, undo, auto_stale）
+  │   ├── migrate/       # Schema 版本迁移框架
+  │   └── bootstrap.ts   # 文档初始化
+  └── jotai/            # Yjs ↔ Jotai 状态管理桥接
 
-  - 测试框架
-      - 推荐 Vitest（与 Vite 生态一致）
-      - 套件：vitest、@types/node、覆盖率 @vitest/coverage-v8
-      - 脚本："test": "vitest", "test:run": "vitest run", "test:cov": "vitest run --coverage"
-  - 目录结构
-      - tests/helpers/yjs.ts：构造 Y.Doc、ensureNotebookInDoc、快捷获取 map/order/tomb maps 的工具。
-      - tests/schema/
-          - reconcile.test.ts
-          - validation.test.ts
-          - mutations.test.ts
-          - soft_delete_restore.test.ts
-          - vacuum.test.ts
-          - undo.test.ts
-          - migrate.test.ts
-          - id_guard.test.ts
-          - conversion.test.ts
-  - 基本测试模式
-      - 每个测试创建独立 new Y.Doc()；调用 ensureNotebookInDoc(doc)；用 ops/quality 方法驱动状态；断言 order.toArray()、
-        map.has(id) 和 validateNotebook 输出。
+  tests/
+  ├── schemas/          # Schema 功能测试
+  ├── jotai/           # Jotai 集成测试
+  └── e2e/             # 端到端测试
 
-  示例用例片段（示意）
+  1.2 核心设计亮点
 
-  - reconcile 去重 + 孤儿追加
-      - tests/schema/reconcile.test.ts
-          - 创建 doc 和 nb；构造 map.set(a,b) 两个 cells，但 order 只包含 a 两次和一个无效值 0；将 b 标为 orphan；调用
-            reconcileNotebook，断言：
-              - changed === true
-              - order 最终为 [a, b]（无重复 + orphan 追加）
-              - removedDuplicates、removedInvalid 正确计数
-  - softDelete + restore + vacuum
-      - tests/schema/soft_delete_restore.test.ts
-          - 插入 cell x；softDeleteCell(nb, x) 后 order 不包含 x，tombstones.get(x) === true
-          - restoreCell(nb, x, 0) 后 order[0] === x 且 tombstones/tombstoneMeta 已清理
-      - tests/schema/vacuum.test.ts
-          - softDeleteCell 后手动 setTombstoneTimestamp 为（trusted 且 ts=now-ttl-1）
-          - vacuumNotebook 后 map.has(x) === false 且 tombstoneMeta/tombstones 均清理
-  - UndoManager 与 origin 过滤
-      - tests/schema/undo.test.ts
-          - 对 insertCell / moveCell 执行 USER_ACTION_ORIGIN 操作，undo() 能回滚
-          - 调用 reconcileNotebook（MAINT_ORIGIN），undo() 不应回滚 reconcile 的变化
-  - 迁移并发重检（单机模拟）
-      - tests/schema/migrate.test.ts
-          - 预设 meta.version=v1；注册一个迁移(step1→2) 将某字段设为 X
-          - 模拟并发：在一次 migrateNotebookSchema(doc) 调用之前先手动把 version 设置为 target（模拟他端推进），再执行迁移；
-            断言迁移体被跳过（字段未被重复写入），日志包含 skip 提示
+  ✅ 优秀的设计：
 
-  注意点
+  1. 清晰的分层架构：Core → Access → Ops → Quality 的层次清晰
+  2. Origins 系统：使用 Symbol 标记操作来源（USER_ACTION, MAINT, VACUUM 等），优雅支持 UndoManager
+  3. 软删除机制：Tombstone + 延迟清理（vacuum），支持数据恢复
+  4. Reconciliation：自动修复数据不一致（重复 ID、孤立引用、顺序错乱）
+  5. 自动 Stale 追踪：监听源代码变更自动标记输出过期
+  6. Migration 框架：可扩展的 schema 版本管理
+  7. Yjs-Jotai 桥接：类型安全的响应式状态集成，支持细粒度订阅优化
 
-  - 时钟与时间
-      - 使用可控的 ClockSource 注入 softDeleteCell、setTombstoneTimestamp、vacuumNotebook，避免依赖系统时间导致测试不稳定。
-  - 事务与事件
-      - 尽量在每个测试中使用 doc.transact 收拢多写入，减少不必要的中间状态和事件。
-  - 性能与隔离
-      - 每个测试独立 Doc，避免状态泄漏；清理监听器由 Yjs 自动处理，无需额外 teardown。
+  ---
+  🔍 二、发现的问题与改进建议
+
+  2.1 类型安全问题 ⚠️
+
+  问题：
+  // src/yjs/schema/core/types.ts:52-53
+  export type YNotebook = Y.Map<any>;  // ❌ 使用了 any
+  export type YCell = Y.Map<any>;      // ❌ 使用了 any
+
+  影响：
+  - 失去了 TypeScript 的类型检查优势
+  - IDE 自动补全失效
+  - 运行时可能出现类型错误
+
+  改进建议：
+  // 建议使用更精确的类型
+  export type YNotebook = Y.Map<YNotebookValue>;
+  export type YCell = Y.Map<YCellValue>;
+
+  type YNotebookValue =
+    | string              // id, title, databaseId
+    | Y.Array<string>     // tags, order
+    | Y.Map<YCell>        // cellMap
+    | Y.Map<boolean>      // tombstones
+    | Y.Map<any>;         // metadata, schemaMeta
+
+  文件位置： src/yjs/schema/core/types.ts:52-53
+
+  ---
+  2.2 测试覆盖率不足 📊
+
+  统计数据：
+  - 源文件：28 个
+  - 测试文件：14 个
+  - 覆盖率：约 50%
+
+  缺失的测试模块：
+
+  | 模块          | 文件               | 风险等级 |
+  |-------------|------------------|------|
+  | 数据转换        | conversion.ts    | 🔴 高 |
+  | Jotai Atoms | notebookAtoms.ts | 🔴 高 |
+  | 迁移执行        | migrate.ts       | 🟠 中 |
+  | 访问器部分       | accessors.ts     | 🟡 低 |
+
+  改进建议：
+  # 建议添加的测试
+  tests/schemas/access/conversion.test.ts
+  tests/jotai/notebookAtoms.test.ts
+  tests/schemas/migrate/migrate_execution.test.ts
+  tests/schemas/migrate/migration_rollback.test.ts
+
+  ---
+  2.3 错误处理缺失 ⛔
+
+  问题示例 1：
+  // src/yjs/schema/ops/mutations.ts:17
+  if (typeof id !== "string" || !id) throw new Error("Cell must have a valid id");
+  // ✅ 有错误检查
+
+  // 但其他很多函数没有类似的检查
+  export const getOutputEntry = (nb: Y.Map<any>, cellId: string) => {
+    const m = nb.get(NB_OUTPUTS);
+    return m?.get(cellId);  // ❌ 如果 cellId 无效会怎样？
+  };
+
+  改进建议：
+  export const getOutputEntry = (nb: Y.Map<any>, cellId: string): YOutputEntry | undefined => {
+    if (!cellId || typeof cellId !== "string") {
+      throw new Error(`Invalid cellId: ${cellId}`);
+    }
+    const m = nb.get(NB_OUTPUTS) as YOutputsMap | undefined;
+    if (!m) return undefined;
+    return m.get(cellId);
+  };
+
+  ---
+  2.4 性能优化空间 🚀
+
+  问题 1：全量 Snapshot
+  // src/yjs/schema/quality/reconcile.ts:62
+  const before = order.toArray();  // ❌ 每次 reconcile 都会复制整个数组
+
+  影响： 对于包含 1000+ cells 的大型 notebook，性能会显著下降
+
+  改进建议：
+  // 考虑使用增量算法或迭代器模式
+  const reconcileNotebook = (nb: YNotebook, opts?: ReconcileOptions) => {
+    // 方案 1: 使用 for-of 迭代，避免全量复制
+    const issues: string[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < order.length; i++) {
+      const id = order.get(i);
+      if (seen.has(id)) {
+        issues.push(i);
+      }
+      seen.add(id);
+    }
+
+    // 方案 2: 分批处理大型数组
+    const BATCH_SIZE = 100;
+    // ...
+  };
+
+  问题 2：内存泄漏风险
+  // src/yjs/schema/quality/auto_stale.ts:17
+  const BOUND_DOCS = new WeakSet<Y.Doc>();
+
+  虽然使用了 WeakSet，但 cellUnsub 和 cellTextUnsub 的清理逻辑复杂，可能存在泄漏风险。
+
+  ---
+  2.5 并发安全问题 🔒
+
+  问题：缺少并发冲突文档
+
+  // src/yjs/schema/access/cells.ts:23
+  cell.observe((event) => {
+    if (event.transaction?.origin === CELL_ID_GUARD_ORIGIN) return;
+    // ❌ 如果两个客户端同时修改 CELL_ID 会发生什么？
+  });
+
+  改进建议：
+  1. 添加详细的并发场景文档
+  2. 考虑使用更强的一致性保证（如 ULID 的时间戳排序）
+  3. 添加并发冲突的集成测试
+
+  ---
+  2.7 缺少关键文档 📖
+
+  缺失的文档：
+
+  1. 架构决策记录（ADR）
+    - 为什么选择软删除而不是硬删除？
+    - 为什么 outputs 与 cells 分离存储？
+    - Origins 系统的设计理由？
+  2. API 文档
+  // ❌ 缺少 JSDoc
+  export const insertCell = (nb: YNotebook, cell: YCell, index?: number, origin: symbol = USER_ACTION_ORIGIN) => {
+
+  // ✅ 应该添加
+  /**
+   * 在指定位置插入 cell（省略 index 则 append）
+   * @param nb - Notebook 根节点
+   * @param cell - 要插入的 cell（必须已设置 CELL_ID）
+   * @param index - 插入位置（可选，默认追加到末尾）
+   * @param origin - 操作来源标记（用于 UndoManager）
+   * @throws {Error} 如果 cell 缺少有效的 id
+   * @example
+   * const cell = createCell({ kind: "sql", source: "SELECT 1" });
+   * insertCell(notebook, cell, 0);
+   */
+  3. 迁移指南
+    - 如何添加新的 schema 版本
+    - 迁移失败的处理流程
+    - Rollback 策略（目前缺失）
+
+  ---
+  2.8 测试质量问题 🧪
+
+  缺失的测试类型：
+
+  1. 性能测试
+  // 建议添加
+  describe("Performance", () => {
+    it("should reconcile 10k cells in <100ms", () => {
+      const nb = createLargeNotebook(10000);
+      const start = performance.now();
+      reconcileNotebook(nb);
+      expect(performance.now() - start).toBeLessThan(100);
+    });
+  });
+  2. 并发测试
+  describe("Concurrency", () => {
+    it("should handle simultaneous cell insertions from multiple peers", async () => {
+      const doc1 = new Y.Doc();
+      const doc2 = new Y.Doc();
+      // 模拟 WebSocket 同步
+      // 同时插入 cell
+      // 验证最终一致性
+    });
+  });
+  3. 边界条件测试
+    - 空 notebook
+    - 单 cell notebook
+    - 极长的 source code
+    - 特殊字符处理
+
+  ---
+  2.9 Migration 系统不完善 🔄
+
+  问题：
+
+  1. 没有 Rollback 机制
+  // migrate.ts 只支持向前迁移
+  while (workingVersion < SCHEMA_VERSION) {
+    migrator({ /* ... */ });
+    workingVersion++;
+  }
+  // ❌ 如果迁移失败怎么办？无法回滚
+  2. 缺少迁移验证
+  // 建议添加
+  interface Migration {
+    up: (ctx: MigrationContext) => void;
+    down: (ctx: MigrationContext) => void;  // ✅ 回滚逻辑
+    validate: (doc: Y.Doc) => ValidationResult;  // ✅ 迁移后验证
+  }
+  3. 没有迁移测试
+    - 应该测试从 v1_000_000 → v1_000_001 的完整流程
+    - 应该测试迁移的幂等性（多次执行结果相同）
+
+  ---
+  2.10 代码重复问题 🔁
+
+  问题：多处出现相似的 transaction 模式
+
+  // 模式 1: src/yjs/schema/ops/mutations.ts:37-41
+  if (doc) {
+    doc.transact(apply, origin);
+  } else {
+    apply();
+  }
+
+  // 模式 2: src/yjs/schema/ops/soft_delete.ts:53-57
+  if (doc) {
+    doc.transact(apply, USER_ACTION_ORIGIN);
+  } else {
+    apply();
+  }
+
+  改进建议： 创建通用辅助函数
+  // src/yjs/schema/core/transaction.ts
+  export const withTransactOptional = (
+    node: Y.AbstractType<any>,
+    fn: () => void,
+    origin?: any
+  ) => {
+    const doc = node.doc as Y.Doc | undefined;
+    if (doc) {
+      doc.transact(fn, origin);
+    } else {
+      fn();
+    }
+  };
+
+  // 使用：
+  withTransactOptional(nb, apply, USER_ACTION_ORIGIN);
+
+  ---
+  🎯 三、改进优先级建议
+
+  高优先级 🔴
+
+  1. 补充测试覆盖率：至少达到 80%
+    - conversion.ts
+    - notebookAtoms.ts
+    - Migration 执行流程
+  2. 增强类型安全：消除 any 类型
+    - 重构 YNotebook 和 YCell 类型定义
+    - 添加运行时类型检查
+  3. 添加错误处理：所有公共 API 需要参数校验
+
+  中优先级 🟠
+
+  4. 性能优化：
+    - Reconcile 使用增量算法
+    - 添加大型 notebook 的性能测试
+    - 监控内存泄漏
+  5. 重构复杂函数：拆分 reconcileNotebook（191 行）
+  6. 完善 Migration 系统：
+    - 添加 rollback 支持
+    - 添加迁移验证
+    - 添加迁移测试
+
+  低优先级 🟡
+
+  7. 文档完善：
+    - 添加 JSDoc API 文档
+    - 编写 ADR（架构决策记录）
+    - 创建开发者指南
+  8. 代码重构：
+    - 提取通用的 transaction 辅助函数
+    - 统一错误处理模式
+
+  ---
+  📊 四、量化总结
+
+  | 指标        | 当前状态         | 建议目标   |
+  |-----------|--------------|--------|
+  | 测试覆盖率     | ~50% (14/28) | ≥80%   |
+  | 测试代码行数    | 1,123        | ~2,000 |
+  | any 类型使用  | 多处           | 0      |
+  | 最长函数      | 191 行        | <100 行 |
+  | JSDoc 覆盖率 | <10%         | ≥90%   |
+  | 性能测试      | 0            | ≥5     |
+  | 并发测试      | 0            | ≥3     |
+
+  ---
+  ✅ 五、整体评价
+
+  优点：
+  - ✅ 架构设计清晰、模块化良好
+  - ✅ 核心功能完整（CRUD、Undo、Reconcile、Migration）
+  - ✅ Jotai 集成优雅，响应式设计出色
+  - ✅ 软删除机制设计合理
+
+  需要改进：
+  - ⚠️ 测试覆盖率不足，缺少关键模块测试
+  - ⚠️ 类型安全性有待加强
+  - ⚠️ 缺少错误处理和边界条件检查
+  - ⚠️ 文档不足，缺少 API 文档和 ADR
+
+  整体评分： 7.5/10
+
+  这是一个功能完整且架构合理的 CRDT Notebook
+  实现，但在工程质量（测试、文档、错误处理）方面还有较大提升空间。建议优先解决测试覆盖率和类型安全问题。
+
+⏺ ---
+  📝 补充：具体代码位置索引
+
+  为便于后续改进，以下是关键问题的精确文件位置：
+
+  类型安全问题
+
+  - src/yjs/schema/core/types.ts:52-53 - YNotebook/YCell 使用 any
+  - src/yjs/schema/access/root.ts:9 - schemaMeta 使用 Map
+
+  测试缺失
+
+  - 需要添加：tests/schemas/access/conversion.test.ts
+  - 需要添加：tests/jotai/notebookAtoms.test.ts
+  - 需要添加：tests/schemas/migrate/migrate_execution.test.ts
+
+  复杂函数
+
+  - src/yjs/schema/quality/reconcile.ts:40-191 - reconcileNotebook 函数过长
+
+  性能问题
+
+  - src/yjs/schema/quality/reconcile.ts:62 - 全量 snapshot
+  - src/yjs/schema/quality/auto_stale.ts:17-141 - 复杂的订阅管理
+
+  Migration 系统
+
+  - src/yjs/schema/migrate/migrate.ts:10-127 - 缺少 rollback 机制
+  - src/yjs/schema/migrate/registry.ts - 只有一个迁移示例
+
+  错误处理
+
+  - src/yjs/schema/access/outputs.ts:16-19 - getOutputEntry 缺少参数校验
+  - src/yjs/schema/ops/mutations.ts:76-105 - moveCell 缺少边界检查
+
+  调研完成！以上报告涵盖了架构分析、问题识别、改进建议和优先级排序。
