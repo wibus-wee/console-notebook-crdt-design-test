@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo } from 'react'
 import { createNotebookAtoms } from '@/yjs/jotai/notebookAtoms'
 import { useYProvider } from './WebsocketProvider'
+import { AwarenessProvider } from './AwarenessProvider'
 
 const NotebookAtomsContext = createContext<ReturnType<typeof createNotebookAtoms> | null>(null)
 const NotebookStatusContext = createContext<'connecting' | 'connected' | 'disconnected'>('connecting')
@@ -14,16 +15,18 @@ export function NotebookProvider({
   serverUrl: string
   children: React.ReactNode
 }) {
-  const { doc, status } = useYProvider({ room, serverUrl })
+  const { doc, status, awareness } = useYProvider({ room, serverUrl })
   const nb = useMemo(() => doc.getMap('root'), [doc])
   const atoms = useMemo(() => createNotebookAtoms(nb), [nb])
 
   return (
-    <NotebookAtomsContext.Provider value={atoms}>
-      <NotebookStatusContext.Provider value={status}>
-        {children}
-      </NotebookStatusContext.Provider>
-    </NotebookAtomsContext.Provider>
+    <AwarenessProvider awareness={awareness}>
+      <NotebookAtomsContext.Provider value={atoms}>
+        <NotebookStatusContext.Provider value={status}>
+          {children}
+        </NotebookStatusContext.Provider>
+      </NotebookAtomsContext.Provider>
+    </AwarenessProvider>
   )
 }
 

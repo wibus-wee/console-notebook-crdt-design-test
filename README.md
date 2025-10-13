@@ -1,4 +1,4 @@
-# 基于 Yjs、Jotai 和 React 的实时协同 Monaco Editor 引擎
+# RisingWave SQL Notebook (CRDT Design Test)
 
 ## Devlogs
 
