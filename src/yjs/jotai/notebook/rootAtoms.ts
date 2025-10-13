@@ -27,7 +27,9 @@ export const createNotebookOrderAtom = (nb: YNotebook) => {
       if (Array.isArray(evt)) {
         return evt.some((e) => Array.isArray(e.path) && e.path[0] === NB_CELL_ORDER);
       }
-      return evt.keysChanged ? evt.keysChanged.has(NB_CELL_ORDER) : false;
+      return evt instanceof Y.YMapEvent && (
+        evt.keysChanged ? evt.keysChanged.has(NB_CELL_ORDER) : false
+      )
     },
   });
 };

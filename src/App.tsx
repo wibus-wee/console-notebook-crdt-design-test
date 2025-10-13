@@ -39,7 +39,7 @@ export default function App() {
 
             <div className="flex items-center gap-4">
               <a
-                href="https://github.com"
+                href="https://github.com/wibus-wee/console-notebook-crdt-design-test"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-muted-foreground transition-colors hover:text-foreground"
