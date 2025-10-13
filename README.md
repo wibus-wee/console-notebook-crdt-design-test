@@ -1,5 +1,11 @@
 # 基于 Yjs、Jotai 和 React 的实时协同 Monaco Editor 引擎
 
+## Devlogs
+
+- [Yjs Undo 模型因“破坏性重写”导致数据重复 -> `Introduce ReconcileV2`](https://github.com/wibus-wee/console-notebook-crdt-design-test/issues/2)
+
+## Directory Structure
+
 ```
   src/yjs/
   ├── schema/
