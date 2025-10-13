@@ -5,6 +5,7 @@ import type { YCell, YNotebook } from "../core/types";
 import { getCellMap, getOrder } from "../access/accessors";
 import { lockCellId } from "../access/cells";
 import { withTransactOptional } from "../core/transaction";
+import { ulid } from "ulid";
 
 /** 在指定位置插入 cell（省略 index 则 append） */
 export const insertCell = (
@@ -13,8 +14,14 @@ export const insertCell = (
   index?: number,
   origin: symbol = USER_ACTION_ORIGIN
 ) => {
-  const id = cell.get(CELL_ID) as string;
-  if (typeof id !== "string" || !id) throw new Error("Cell must have a valid id");
+  if (cell.doc) {
+    const preset = cell.get(CELL_ID) as string | undefined;
+    if (preset) {
+      console.warn(`Inserting cell with preset id "${preset}". This may cause id conflicts. For safety, a new id will be generated instead.`);
+    }
+  }
+  const id = ulid();
+  cell.set(CELL_ID, id);
 
   const apply = () => {
     const map = getCellMap(nb);
