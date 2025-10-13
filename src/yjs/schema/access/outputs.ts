@@ -14,8 +14,12 @@ export const getOutputsMap = (nb: Y.Map<any>): YOutputsMap => {
 
 /** 获取某个 cell 的输出记录（不存在则返回 undefined，不创建） */
 export const getOutputEntry = (nb: Y.Map<any>, cellId: string): YOutputEntry | undefined => {
+  if (!cellId || typeof cellId !== "string") {
+    throw new Error(`Invalid cellId: ${cellId}`);
+  }
   const m = nb.get(NB_OUTPUTS) as YOutputsMap | undefined;
-  return m?.get(cellId);
+  if (!m) return undefined;
+  return m.get(cellId);
 };
 
 /** 确保某个 cell 的输出记录存在（必要时创建空骨架） */

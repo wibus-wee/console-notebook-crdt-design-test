@@ -14,7 +14,10 @@ import { withTransactOptional } from "../core/transaction";
 
 const CELL_ID_REGISTRY: WeakMap<YCell, string> = new WeakMap();
 
-/** 保护 Cell id 不被后续变更（CRDT 合并后仍保持稳定主键） */
+/** 保护 Cell id 不被后续变更
+ * （CRDT 合并后仍保持稳定主键）
+ * 但是在理论上，Cell ID 不应该被修改，因为它是用户不可见的主键，在 UI 上没有编辑入口
+ */
 export const lockCellId = (cell: YCell) => {
   if (CELL_ID_REGISTRY.has(cell)) return;
   const id = cell.get(CELL_ID);

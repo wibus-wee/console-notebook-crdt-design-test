@@ -47,9 +47,15 @@ type CellOutputValue = CellOutputRecord[keyof CellOutputRecord];
 export type YOutputEntry = Y.Map<CellOutputValue>;
 export type YOutputsMap = Y.Map<YOutputEntry>;
 
+type YNotebookValue =
+| string              // id, title, databaseId
+| Y.Array<string>     // tags, order
+| Y.Map<YCell>        // cellMap
+| Y.Map<boolean>      // tombstones
+| Y.Map<any>;         // metadata, schemaMeta
 
 // Y Handles (keep permissive any typing to align with Yjs flexibility)
-export type YNotebook = Y.Map<any>;
+export type YNotebook = Y.Map<YNotebookValue>;
 export type YCell = Y.Map<any>;
 
 export interface NotebookRoot {
