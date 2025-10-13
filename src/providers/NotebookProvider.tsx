@@ -1,23 +1,24 @@
-import { createContext, useContext, useMemo } from 'react'
-import { createNotebookAtoms } from '@/yjs/jotai/notebookAtoms'
-import { useYProvider } from './WebsocketProvider'
-import { AwarenessProvider } from './AwarenessProvider'
+import { createContext, useContext, useMemo } from "react";
+import { createNotebookAtoms, type NotebookAtoms } from "@/yjs/jotai/notebookAtoms";
+import { ensureNotebookInDoc } from "@/yjs/schema/bootstrap";
+import { useYProvider } from "./WebsocketProvider";
+import { AwarenessProvider } from "./AwarenessProvider";
 
-const NotebookAtomsContext = createContext<ReturnType<typeof createNotebookAtoms> | null>(null)
-const NotebookStatusContext = createContext<'connecting' | 'connected' | 'disconnected'>('connecting')
+const NotebookAtomsContext = createContext<NotebookAtoms | null>(null);
+const NotebookStatusContext = createContext<"connecting" | "connected" | "disconnected">("connecting");
 
 export function NotebookProvider({
   room,
   serverUrl,
   children,
 }: {
-  room: string
-  serverUrl: string
-  children: React.ReactNode
+  room: string;
+  serverUrl: string;
+  children: React.ReactNode;
 }) {
-  const { doc, status, awareness } = useYProvider({ room, serverUrl })
-  const nb = useMemo(() => doc.getMap('root'), [doc])
-  const atoms = useMemo(() => createNotebookAtoms(nb), [nb])
+  const { doc, status, awareness } = useYProvider({ room, serverUrl });
+  const nb = useMemo(() => ensureNotebookInDoc(doc), [doc]);
+  const atoms = useMemo(() => createNotebookAtoms(nb), [nb]);
 
   return (
     <AwarenessProvider awareness={awareness}>
@@ -27,15 +28,15 @@ export function NotebookProvider({
         </NotebookStatusContext.Provider>
       </NotebookAtomsContext.Provider>
     </AwarenessProvider>
-  )
+  );
 }
 
 export function useNotebookAtoms() {
-  const ctx = useContext(NotebookAtomsContext)
-  if (!ctx) throw new Error('useNotebookAtoms must be used within NotebookProvider')
-  return ctx
+  const ctx = useContext(NotebookAtomsContext);
+  if (!ctx) throw new Error("useNotebookAtoms must be used within NotebookProvider");
+  return ctx;
 }
 
 export function useNotebookStatus() {
-  return useContext(NotebookStatusContext)
+  return useContext(NotebookStatusContext);
 }

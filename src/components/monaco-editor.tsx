@@ -157,7 +157,7 @@ const MonacoEditor = memo(
           height={autoResize ? editorHeight : height}
           language={language}
           {...(controlled ? { value, onChange: handleEditorChange } : { defaultValue })}
-          theme={"light"}
+          theme={"vs-dark"}
           onMount={handleEditorDidMount}
           options={defaultOptions}
           loading={<div className="min-h-40" />}
