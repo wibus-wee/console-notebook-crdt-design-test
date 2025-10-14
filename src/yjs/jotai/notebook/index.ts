@@ -12,6 +12,7 @@ import { withTransactOptional } from "@/yjs/schema/core/transaction";
 export const createNotebookAtoms = (nb: YNotebook): NotebookAtoms => {
   const snapshotAtom = createNotebookSnapshotAtom(nb);
   const actions = createNotebookActions(nb);
+  const outputsAtom = atom((get) => get(snapshotAtom).outputs);
 
   const titleAtom = atom(
     (get) => get(snapshotAtom).title,
@@ -29,11 +30,13 @@ export const createNotebookAtoms = (nb: YNotebook): NotebookAtoms => {
 
   const getCellAtoms = memoize((cellId: string): NotebookCellAtoms => {
     const cellDataAtom = atom((get) => get(snapshotAtom).cells[cellId]);
+    const cellOutputAtom = atom((get) => get(outputsAtom)[cellId]);
     return {
       idAtom: atom((get) => get(cellDataAtom)?.id ?? cellId),
       kindAtom: atom((get) => get(cellDataAtom)?.kind),
       sourceAtom: atom((get) => get(cellDataAtom)?.source),
       metadataAtom: atom((get) => get(cellDataAtom)?.metadata),
+      outputAtom: atom((get) => get(cellOutputAtom)),
       // yCell is no longer exposed as it's an implementation detail of the Yjs layer.
       // UI should only depend on the snapshot.
     };
@@ -46,6 +49,7 @@ export const createNotebookAtoms = (nb: YNotebook): NotebookAtoms => {
 
   return {
     snapshotAtom,
+    outputsAtom,
     titleAtom,
     cellIdListAtom,
     getCellAtoms,

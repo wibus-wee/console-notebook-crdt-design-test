@@ -1,7 +1,7 @@
 import type { Atom } from "jotai";
 import type { Text as YText } from "yjs";
 import type { CellKind, CellMetadataModel } from "@/yjs/schema/core/types";
-import type { NotebookSnapshot } from "./snapshot";
+import type { NotebookSnapshot, CellOutputSnapshot } from "./snapshot";
 
 /**
  * Write options accepted by notebook cell insertion.
@@ -46,6 +46,8 @@ export interface NotebookCellAtoms {
   sourceAtom: Atom<string | undefined>;
   /** Read-only atom for the cell's metadata. */
   metadataAtom: Atom<CellMetadataModel | undefined>;
+  /** Read-only atom for the cell's execution output state. */
+  outputAtom: Atom<CellOutputSnapshot | undefined>;
 }
 
 /**
@@ -54,6 +56,8 @@ export interface NotebookCellAtoms {
 export interface NotebookAtoms {
   /** The master atom holding the entire notebook state snapshot. */
   snapshotAtom: Atom<NotebookSnapshot>;
+  /** Read-only atom for the notebook outputs keyed by cell id. */
+  outputsAtom: Atom<Record<string, CellOutputSnapshot>>;
   /** Read-only atom for the notebook title. */
   titleAtom: Atom<string>;
   /** Read-only atom for the ordered list of cell ids. */

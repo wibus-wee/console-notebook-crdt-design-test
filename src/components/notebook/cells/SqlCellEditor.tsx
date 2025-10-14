@@ -1,10 +1,12 @@
 import { useAtomValue } from "jotai";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { NotebookCellAtoms } from "@/yjs/jotai/notebookAtoms";
-import { useNotebookAtoms } from "@/providers/NotebookProvider";
+import { useNotebookAtoms, useNotebookYjs } from "@/providers/NotebookProvider";
 import { CollaborativeMonacoEditor } from "@/components/collaborative-monaco-editor";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { startExecuteCell, applyExecuteResultForCurrentRun } from "@/yjs/schema/ops/execute";
+import type { QueryResponse } from "@/yjs/api-gen-type";
 
 interface SqlCellEditorProps {
   cellAtoms: NotebookCellAtoms;
@@ -12,11 +14,14 @@ interface SqlCellEditorProps {
 
 export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
   const { actions, getCellYText } = useNotebookAtoms();
+  const { notebook } = useNotebookYjs();
   const cellId = useAtomValue(cellAtoms.idAtom);
   const source = useAtomValue(cellAtoms.sourceAtom);
   const metadata = useAtomValue(cellAtoms.metadataAtom);
-  const [isRunning, setIsRunning] = useState(false);
-  const [hasRun, setHasRun] = useState(false);
+  const output = useAtomValue(cellAtoms.outputAtom);
+  const isRunning = output?.running ?? false;
+  const hasRun = typeof output?.completedAt === "number";
+  const isStale = output?.stale ?? false;
   const editorRef = useRef<HTMLDivElement>(null);
   const yText = getCellYText(cellId);
 
@@ -26,13 +31,50 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
     }
   };
 
+  const applyResult = (result: QueryResponse) => {
+    if (!notebook) return;
+    applyExecuteResultForCurrentRun(notebook, cellId, result, {
+      completedAt: Date.now(),
+    });
+  };
+
   const handleRun = async () => {
-    setIsRunning(true);
-    // Simulate query execution
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsRunning(false);
-    setHasRun(true);
-    console.log("Execute SQL:", source);
+    if (!notebook || isRunning || !source?.trim()) return;
+
+    startExecuteCell(notebook, cellId, { now: Date.now() });
+
+    try {
+      // Simulate query execution via a mock delay.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const result: QueryResponse = {
+        columns: [
+          {
+            name: "result",
+            type: "text",
+            isPrimaryKey: false,
+            isHidden: false,
+          },
+        ],
+        rows: [
+          {
+            result: `Simulated at ${new Date().toLocaleTimeString()}`,
+          },
+        ],
+        rowsAffected: 1,
+      };
+
+      applyResult(result);
+      console.log("Execute SQL:", source);
+    } catch (error) {
+      applyResult({
+        columns: [],
+        rows: [],
+        rowsAffected: 0,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+      console.error("Failed to execute SQL", error);
+    }
   };
 
   // Add keyboard shortcut for running SQL (Cmd/Ctrl+Enter)
@@ -51,7 +93,7 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
       editor.addEventListener("keydown", handleKeyDown);
       return () => editor.removeEventListener("keydown", handleKeyDown);
     }
-  }, [isRunning, source]);
+  }, [handleRun, isRunning, source]);
 
   return (
     <div className="flex flex-col gap-4" ref={editorRef}>
@@ -64,6 +106,11 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               Executed
+            </Badge>
+          )}
+          {isStale && (
+            <Badge variant="outline" className="text-[10px]">
+              Stale
             </Badge>
           )}
         </div>

@@ -1,4 +1,3 @@
-import * as Y from "yjs";
 import { ulid } from "ulid";
 import { EXECUTION_ORIGIN } from "../core/origins";
 import type { YNotebook } from "../core/types";

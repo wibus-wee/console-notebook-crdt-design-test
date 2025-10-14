@@ -1,9 +1,10 @@
 import { atom } from "jotai";
-import * as Y from "yjs";
-import { yCellToModel, yNotebookToModel } from "@/yjs/schema/access/conversion";
+import { yCellToModel, yNotebookToModel, yOutputsToModel } from "@/yjs/schema/access/conversion";
 import { getCellMap } from "@/yjs/schema/access/accessors";
-import type { CellModel, NotebookModel, YNotebook } from "@/yjs/schema/core/types";
+import type { CellModel, CellOutputRecord, NotebookModel, YNotebook } from "@/yjs/schema/core/types";
 import { isEqual } from "es-toolkit/compat";
+
+export type CellOutputSnapshot = Omit<CellOutputRecord, "runId">;
 
 /**
  * Represents a complete, immutable snapshot of the notebook state.
@@ -11,6 +12,7 @@ import { isEqual } from "es-toolkit/compat";
  */
 export type NotebookSnapshot = Omit<NotebookModel, "cells"> & {
   cells: Record<string, CellModel>;
+  outputs: Record<string, CellOutputSnapshot>;
 };
 
 /**
@@ -32,15 +34,20 @@ export const yNotebookToSnapshot = (nb: YNotebook): NotebookSnapshot => {
   }
 
   // 3. Combine and freeze for immutability (dev-mode guard rails).
+  const outputs = yOutputsToModel(nb);
+
   const snapshot: NotebookSnapshot = {
     ...baseModel,
     cells,
+    outputs,
   };
 
   if (process.env.NODE_ENV === "development") {
     Object.freeze(snapshot);
     Object.freeze(snapshot.cells);
+    Object.freeze(snapshot.outputs);
     Object.values(snapshot.cells).forEach(Object.freeze);
+    Object.values(snapshot.outputs).forEach(Object.freeze);
   }
 
   return snapshot;
