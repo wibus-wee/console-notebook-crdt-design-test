@@ -2,7 +2,6 @@ import * as Y from "yjs";
 import { CELL_ID, CELL_KIND, CELL_META, CELL_SOURCE } from "@/yjs/schema/core/keys";
 import { DEFAULT_CELL_METADATA, type CellKind, type YCell, type YNotebook } from "@/yjs/schema/core/types";
 import { insertCell as insertCellMutation, moveCell as moveCellMutation, removeCell as removeCellMutation } from "@/yjs/schema/ops/mutations";
-import type { NotebookCellAtomFactory } from "./cellAtoms";
 import type { InsertCellOptions, NotebookActions } from "./types";
 
 const defaultSourceByKind: Record<CellKind, string> = {
@@ -30,17 +29,16 @@ const createCellDraft = (kind: CellKind, opts?: InsertCellOptions): YCell => {
   return cell as YCell;
 };
 
-export const createNotebookActions = (nb: YNotebook, factory: NotebookCellAtomFactory): NotebookActions => ({
+export const createNotebookActions = (nb: YNotebook): NotebookActions => ({
   insertCell: (kind, opts) => {
     const cell = createCellDraft(kind, opts);
     insertCellMutation(nb, cell, opts?.index);
     const cellId = cell.get(CELL_ID) as string;
-    factory.invalidate(cellId); // ensure subsequent reads rebuild atoms with finalised structures
+    // Invalidation is no longer needed; the snapshot atom will update automatically.
     return cellId;
   },
   removeCell: (cellId) => {
     removeCellMutation(nb, cellId);
-    factory.invalidate(cellId);
   },
   moveCell: (cellId, toIndex) => {
     moveCellMutation(nb, cellId, toIndex);

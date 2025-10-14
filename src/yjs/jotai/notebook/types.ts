@@ -1,5 +1,6 @@
-import type { Atom, WritableAtom } from "jotai";
-import type { CellKind, CellMetadataModel, YCell } from "@/yjs/schema/core/types";
+import type { Atom } from "jotai";
+import type { CellKind, CellMetadataModel } from "@/yjs/schema/core/types";
+import type { NotebookSnapshot } from "./snapshot";
 
 /**
  * Write options accepted by notebook cell insertion.
@@ -34,22 +35,23 @@ export interface NotebookCellAtoms {
   /** Snapshot of immutable cell id (read only). */
   idAtom: Atom<string>;
   /** Cell kind atom ("sql" | "markdown"). */
-  kindAtom: WritableAtom<CellKind, [CellKind | ((prev: CellKind) => CellKind)], void>;
-  /** Cell source content backed by Y.Text. */
-  sourceAtom: WritableAtom<string, [string | ((prev: string) => string)], void>;
-  /** Cell metadata (shallow model) backed by Y.Map. */
-  metadataAtom: WritableAtom<CellMetadataModel, [CellMetadataModel | ((prev: CellMetadataModel) => CellMetadataModel)], void>;
-  /** Underlying Y.Cell reference mainly for advanced integrations (debug, inspection). */
-  yCell: YCell;
+  /** Read-only atom for the cell's kind ("sql" | "markdown"). */
+  kindAtom: Atom<CellKind | undefined>;
+  /** Read-only atom for the cell's source content. */
+  sourceAtom: Atom<string | undefined>;
+  /** Read-only atom for the cell's metadata. */
+  metadataAtom: Atom<CellMetadataModel | undefined>;
 }
 
 /**
  * Root notebook atoms exposed through the provider context.
  */
 export interface NotebookAtoms {
-  /** Title atom for the notebook (Y.Map key). */
-  titleAtom: WritableAtom<string, [string | ((prev: string) => string)], void>;
-  /** Ordered list of cell ids observing Y.Array order. */
+  /** The master atom holding the entire notebook state snapshot. */
+  snapshotAtom: Atom<NotebookSnapshot>;
+  /** Read-only atom for the notebook title. */
+  titleAtom: Atom<string>;
+  /** Read-only atom for the ordered list of cell ids. */
   cellIdListAtom: Atom<string[]>;
   /**
    * Lazily create/fetch per-cell atom bundles.
