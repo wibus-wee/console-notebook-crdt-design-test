@@ -20,6 +20,37 @@ export const NotebookCell = ({ notebook, cellId, index, total }: NotebookCellPro
   const cellAtoms = useMemo<NotebookCellAtoms>(() => notebook.getCellAtoms(cellId), [notebook, cellId]);
   const kind = useAtomValue(cellAtoms.kindAtom);
   const peers = useCellPeers(cellId);
+  const editingPeers = useMemo(
+    () =>
+      peers.map((peer) => {
+        const name = peer.user.name || "Anonymous";
+        const initials = name
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((part) => part[0]?.toUpperCase() ?? "")
+          .join("")
+          .slice(0, 2) || "•";
+        return {
+          id: peer.clientId,
+          name,
+          color: peer.user.color,
+          initials,
+        };
+      }),
+    [peers],
+  );
+  const maxVisiblePeers = 3;
+  const visiblePeers = editingPeers.slice(0, maxVisiblePeers);
+  const overflowCount = Math.max(editingPeers.length - maxVisiblePeers, 0);
+  const editingNames = visiblePeers.map((peer) => peer.name.split(" ")[0] ?? peer.name);
+  const labelText =
+    editingPeers.length === 0
+      ? ""
+      : `Editing: ${editingPeers.map((peer) => peer.name).join(", ")}`;
+  const summaryText =
+    editingPeers.length === 0
+      ? ""
+      : `Editing: ${editingNames.join(", ")}${overflowCount > 0 ? ` +${overflowCount}` : ""}`;
   const isFirst = index === 0;
   const isLast = index === total - 1;
 
@@ -62,11 +93,45 @@ export const NotebookCell = ({ notebook, cellId, index, total }: NotebookCellPro
             <span className="text-xs text-muted-foreground">Cell {index + 1}</span>
 
             {/* Collaboration Indicator */}
-            {peers.length > 0 && (
-              <Badge variant="accent">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                <span>{peers.length} editing</span>
-              </Badge>
+            {editingPeers.length > 0 && (
+              <div
+                className="flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
+                aria-label={labelText}
+                title={labelText}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="opacity-80"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+                <div className="flex -space-x-2">
+                  {visiblePeers.map((peer) => (
+                    <div
+                      key={peer.id}
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-background text-[0.625rem] font-semibold uppercase text-white shadow-sm"
+                      style={{ backgroundColor: peer.color }}
+                    >
+                      {peer.initials}
+                    </div>
+                  ))}
+                  {overflowCount > 0 && (
+                    <div className="flex h-5 w-5 items-center justify-center rounded-full border border-accent/30 bg-accent/20 text-[0.625rem] font-semibold text-accent shadow-sm">
+                      +{overflowCount}
+                    </div>
+                  )}
+                </div>
+                <span className="max-w-[140px] truncate">{summaryText}</span>
+              </div>
             )}
           </div>
         </div>
