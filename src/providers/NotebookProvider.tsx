@@ -1,10 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Doc as YDoc } from "yjs";
 import { createNotebookAtoms, type NotebookAtoms } from "@/yjs/jotai/notebookAtoms";
 import { ensureNotebookInDoc } from "@/yjs/schema/bootstrap";
 import type { YNotebook } from "@/yjs/schema/core/types";
 import { useYProvider, type WsTrafficEntry } from "./WebsocketProvider";
 import { AwarenessProvider } from "./AwarenessProvider";
+import { createNotebookUndoManager } from "@/yjs/schema/quality/undo";
+import type { UndoManager } from "yjs";
+import { NotebookUndoHistory } from "@/yjs/undo/notebookUndoHistory";
+import { CELL_ID_GUARD_ORIGIN, EXECUTION_ORIGIN, MAINT_ORIGIN, USER_ACTION_ORIGIN, VACUUM_ORIGIN } from "@/yjs/schema";
 
 const NotebookAtomsContext = createContext<NotebookAtoms | null>(null);
 const NotebookStatusContext = createContext<"connecting" | "connected" | "disconnected">("connecting");
@@ -14,6 +18,8 @@ interface NotebookYjsContextValue {
   traffic: WsTrafficEntry[];
   synced: boolean;
   syncedOnce: boolean;
+  undoManager: UndoManager;
+  undoHistory: NotebookUndoHistory;
 }
 
 const NotebookYjsContext = createContext<NotebookYjsContextValue | null>(null);
@@ -42,14 +48,31 @@ export function NotebookProvider({
     setNotebook(root);
   }, [doc, connect, syncedOnce, status, notebook]);
 
+  const undoManager = useMemo(() => (notebook ? createNotebookUndoManager(notebook, {
+    trackedOrigins: new Set([null, USER_ACTION_ORIGIN, VACUUM_ORIGIN, MAINT_ORIGIN, CELL_ID_GUARD_ORIGIN, EXECUTION_ORIGIN]),
+  }) : null), [notebook]);
+
+  useEffect(() => () => {
+    undoManager?.destroy();
+  }, [undoManager]);
+
+  const undoHistory = useMemo(
+    () => (notebook && undoManager ? new NotebookUndoHistory(undoManager, notebook) : null),
+    [notebook, undoManager]
+  );
+
+  useEffect(() => () => {
+    undoHistory?.destroy();
+  }, [undoHistory]);
+
   const atoms = useMemo(() => (notebook ? createNotebookAtoms(notebook) : null), [notebook]);
-  const isReady = notebook != null && atoms != null;
+  const isReady = notebook != null && atoms != null && undoManager != null && undoHistory != null;
 
   return (
     <AwarenessProvider awareness={awareness}>
       <NotebookStatusContext.Provider value={status}>
-        {isReady && notebook && atoms ? (
-          <NotebookYjsContext.Provider value={{ notebook, doc, traffic, synced, syncedOnce }}>
+        {isReady && notebook && atoms && undoManager && undoHistory ? (
+          <NotebookYjsContext.Provider value={{ notebook, doc, traffic, synced, syncedOnce, undoManager, undoHistory }}>
             <NotebookAtomsContext.Provider value={atoms}>{children}</NotebookAtomsContext.Provider>
           </NotebookYjsContext.Provider>
         ) : (
@@ -74,6 +97,19 @@ export function useNotebookYjs() {
   const ctx = useContext(NotebookYjsContext);
   if (!ctx) throw new Error("useNotebookYjs must be used within NotebookProvider");
   return ctx;
+}
+
+export function useNotebookUndoManager() {
+  return useNotebookYjs().undoManager;
+}
+
+export function useNotebookUndoHistory() {
+  const { undoHistory } = useNotebookYjs();
+  return useSyncExternalStore(
+    (listener) => undoHistory.subscribe(listener),
+    () => undoHistory.getSnapshot(),
+    () => undoHistory.getSnapshot()
+  );
 }
 
 function NotebookBootstrapFallback({ status }: { status: "connecting" | "connected" | "disconnected" }) {
