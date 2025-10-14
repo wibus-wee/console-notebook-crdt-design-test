@@ -50,9 +50,22 @@ export function useYProvider({ room, serverUrl, connect = true }: UseYProviderOp
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [awareness, setAwareness] = useState<Awareness | null>(null);
   const [traffic, setTraffic] = useState<WsTrafficEntry[]>([]);
+  const [synced, setSynced] = useState(false);
+  const [syncedOnce, setSyncedOnce] = useState(false);
 
   useEffect(() => {
-    if (!connect) return;
+    setSynced(false);
+
+    if (!connect) {
+      providerRef.current = null;
+      setStatus("disconnected");
+      setAwareness(null);
+      setSyncedOnce(false);
+      return;
+    }
+
+    setStatus("connecting");
+    setSyncedOnce(false);
     const provider = new WebsocketProvider(serverUrl, room, doc, { connect });
     providerRef.current = provider;
     setAwareness(provider.awareness);
@@ -60,6 +73,11 @@ export function useYProvider({ room, serverUrl, connect = true }: UseYProviderOp
     const isDev = import.meta.env.DEV;
     let disposed = false;
     let nextId = 1;
+
+    const handleSync = (isSynced: boolean) => {
+      setSynced(isSynced);
+      if (isSynced) setSyncedOnce(true);
+    };
 
     const appendTraffic = (entry: Omit<WsTrafficEntry, "id">) => {
       if (!isDev || disposed) return;
@@ -251,6 +269,7 @@ export function useYProvider({ room, serverUrl, connect = true }: UseYProviderOp
       setStatus(e.status === "connected" ? "connected" : "disconnected");
     };
     provider.on("status", handleStatus);
+    provider.on("sync", handleSync);
 
     const handleDocUpdate = (update: Uint8Array, origin: unknown) => {
       if (!isDev) return;
@@ -286,6 +305,7 @@ export function useYProvider({ room, serverUrl, connect = true }: UseYProviderOp
     return () => {
       disposed = true;
       provider.off("status", handleStatus);
+      provider.off("sync", handleSync);
       doc.off("update", handleDocUpdate);
       provider.awareness.off("update", handleAwarenessUpdate);
       try {
@@ -295,11 +315,12 @@ export function useYProvider({ room, serverUrl, connect = true }: UseYProviderOp
       providerRef.current = null;
       setAwareness(null);
       setStatus("disconnected");
+      setSynced(false);
       if (isDev) {
         setTraffic([]);
       }
     };
   }, [room, serverUrl, connect, doc]);
 
-  return { doc, provider: providerRef.current, status, awareness, traffic };
+  return { doc, provider: providerRef.current, status, awareness, traffic, synced, syncedOnce };
 }
