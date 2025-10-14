@@ -1,4 +1,4 @@
-# RisingWave SQL Notebook (CRDT Design Test)
+# CRDT Test
 
 ## Devlogs
 
@@ -22,3 +22,17 @@
   ├── jotai/           # Jotai 集成测试
   └── e2e/             # 端到端测试
 ```
+
+## Get Started
+
+```bash
+bun i 
+bun server # yjs websocket server (with node runtime, fork from y-websocket)
+bun dev # frontend dev server
+```
+
+## Author
+
+CRDT Test © Wibus. Created on Oct 07, 2025
+
+> [Personal Website](http://wibus.ren/) · [Blog](https://blog.wibus.ren/) · GitHub [@wibus-wee](https://github.com/wibus-wee/) · Telegram [@wibus✪](https://t.me/wibus_wee)
