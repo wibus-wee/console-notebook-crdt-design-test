@@ -1,4 +1,5 @@
 import type { QueryResponse } from "@/yjs/api-gen-type";
+import type { YMap } from "node_modules/yjs/dist/src/types/YMap";
 import * as Y from "yjs";
 
 export type CellKind = "sql" | "markdown";
@@ -30,6 +31,7 @@ export interface NotebookModel {
   tags: string[];
   metadata: NotebookMetadataModel;
   order: string[]; // 有序 cellId 列表
+  cells: YMap<YCell>;
   tombstones: Record<string, true>;
 }
 

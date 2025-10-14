@@ -27,6 +27,7 @@ import {
   type YNotebook,
   type YOutputsMap,
 } from "../core/types";
+import { getCellMap } from "./accessors";
 
 export const yCellToModel = (c: YCell): CellModel => {
   const src = (c.get(CELL_SOURCE) as Y.Text | undefined)?.toString() ?? "";
@@ -68,6 +69,7 @@ export const yNotebookToModel = (nb: YNotebook): NotebookModel => {
   const rawDbId = nb.get(NB_DATABASE_ID);
   const databaseId = typeof rawDbId === "string" ? rawDbId : null;
   const order = (nb.get(NB_CELL_ORDER) as Y.Array<string> | undefined)?.toArray() ?? [];
+  const cells = getCellMap(nb);
   const tomb = nb.get(NB_TOMBSTONES) as Y.Map<boolean> | undefined;
   const tombstones: Record<string, true> = {};
   tomb?.forEach((v, k) => {
@@ -81,6 +83,7 @@ export const yNotebookToModel = (nb: YNotebook): NotebookModel => {
     tags,
     metadata,
     order,
+    cells,
     tombstones,
   };
 };
