@@ -6,6 +6,7 @@ import { NotebookCellList } from "@/components/notebook/NotebookCellList";
 import { Card, CardContent } from "@/components/ui/Card";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts, isMac } from "@/hooks/useKeyboardShortcuts";
+import { NotebookDevPanel } from "./NotebookDevPanel";
 
 export function NotebookView() {
   const status = useNotebookStatus();
@@ -219,6 +220,7 @@ export function NotebookView() {
         onClose={() => setIsCommandPaletteOpen(false)}
         commands={commands}
       />
+      <NotebookDevPanel />
     </>
   );
 }
