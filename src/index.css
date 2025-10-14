@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@custom-variant dark (.dark);
 @theme {
   /* ========================================
      Vercel-Grade Color System
