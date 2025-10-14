@@ -1,9 +1,12 @@
 import { atom } from "jotai";
+import { memoize } from "es-toolkit/compat";
+import { getCell } from "@/yjs/schema/access/accessors";
+import { CELL_SOURCE } from "@/yjs/schema/core/keys";
+import type { YNotebook } from "@/yjs/schema/core/types";
+import type { Text as YText } from "yjs";
 import { createNotebookSnapshotAtom } from "./snapshot";
 import { createNotebookActions } from "./actions";
 import type { NotebookAtoms, NotebookCellAtoms } from "./types";
-import type { YNotebook } from "@/yjs/schema/core/types";
-import { memoize } from "es-toolkit/compat";
 
 export const createNotebookAtoms = (nb: YNotebook): NotebookAtoms => {
   const snapshotAtom = createNotebookSnapshotAtom(nb);
@@ -24,11 +27,17 @@ export const createNotebookAtoms = (nb: YNotebook): NotebookAtoms => {
     };
   });
 
+  const getCellYText = (cellId: string): YText | undefined => {
+    const cell = getCell(nb, cellId);
+    return (cell?.get(CELL_SOURCE) as YText | undefined) ?? undefined;
+  };
+
   return {
     snapshotAtom,
     titleAtom,
     cellIdListAtom,
     getCellAtoms,
+    getCellYText,
     actions,
   };
 };

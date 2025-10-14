@@ -151,9 +151,9 @@ const MonacoEditor = memo(
     };
 
     return (
-      <div className={cn("border rounded-md overflow-hidden", className)}>
+      <div className={cn("border rounded-md overflow-visible relative", className)}>
         <Editor
-          className="h-auto min-h-40"
+          className="h-auto min-h-40 rounded-md"
           height={autoResize ? editorHeight : height}
           language={language}
           {...(controlled ? { value, onChange: handleEditorChange } : { defaultValue })}

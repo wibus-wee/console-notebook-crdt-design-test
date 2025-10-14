@@ -1,6 +1,7 @@
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { useState, useEffect, useRef } from "react";
 import type { NotebookCellAtoms } from "@/yjs/jotai/notebookAtoms";
+import { useNotebookAtoms } from "@/providers/NotebookProvider";
 import { CollaborativeMonacoEditor } from "@/components/collaborative-monaco-editor";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -10,18 +11,19 @@ interface SqlCellEditorProps {
 }
 
 export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
+  const { actions, getCellYText } = useNotebookAtoms();
   const cellId = useAtomValue(cellAtoms.idAtom);
-  const [source, setSource] = useAtom(cellAtoms.sourceAtom);
-  const [metadata, setMetadata] = useAtom(cellAtoms.metadataAtom);
+  const source = useAtomValue(cellAtoms.sourceAtom);
+  const metadata = useAtomValue(cellAtoms.metadataAtom);
   const [isRunning, setIsRunning] = useState(false);
   const [hasRun, setHasRun] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
+  const yText = getCellYText(cellId);
 
   const toggleBackground = () => {
-    setMetadata((prev) => ({
-      ...prev,
-      backgroundDDL: !prev.backgroundDDL,
-    }));
+    if (metadata) {
+      actions.updateCellMetadata(cellId, { backgroundDDL: !metadata.backgroundDDL });
+    }
   };
 
   const handleRun = async () => {
@@ -38,7 +40,7 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        if (!isRunning && source.trim()) {
+        if (!isRunning && source?.trim()) {
           handleRun();
         }
       }
@@ -71,7 +73,7 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
               <input
                 type="checkbox"
                 className="peer h-4 w-4 cursor-pointer appearance-none rounded border border-input bg-background transition-all checked:border-accent checked:bg-accent focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                checked={metadata.backgroundDDL}
+                checked={metadata?.backgroundDDL ?? false}
                 onChange={toggleBackground}
               />
               <svg
@@ -95,7 +97,7 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
             variant="accent"
             size="sm"
             onClick={handleRun}
-            disabled={isRunning || !source.trim()}
+            disabled={isRunning || !source?.trim()}
             className="gap-1.5"
             title="Run query (Cmd+Enter)"
           >
@@ -117,15 +119,14 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
       </div>
 
       <CollaborativeMonacoEditor
-        controlled
-        value={source}
-        onChange={setSource}
+        yText={yText}
+        defaultValue={source ?? ""}
         language="sql"
         autoResize
         minHeight={200}
         maxHeight={420}
         awarenessCellId={cellId}
-        className="overflow-hidden rounded-lg border border-border shadow-sm"
+        className="rounded-lg border border-border shadow-sm"
       />
     </div>
   );

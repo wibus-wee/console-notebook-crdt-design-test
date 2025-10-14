@@ -57,7 +57,7 @@ export default function App() {
         <main className="mx-auto max-w-6xl px-6 py-12">
           <NotebookProvider
             room="demo-notebook-room"
-            serverUrl="ws://localhost:1234"
+            serverUrl="ws://192.168.1.53:1234"
           >
             <NotebookView />
           </NotebookProvider>

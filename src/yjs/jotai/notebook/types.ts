@@ -1,4 +1,5 @@
 import type { Atom } from "jotai";
+import type { Text as YText } from "yjs";
 import type { CellKind, CellMetadataModel } from "@/yjs/schema/core/types";
 import type { NotebookSnapshot } from "./snapshot";
 
@@ -25,6 +26,10 @@ export interface NotebookActions {
   removeCell: (cellId: string) => void;
   /** Move an existing cell to a new index if both exist. */
   moveCell: (cellId: string, toIndex: number) => void;
+  /** Update the source code of a cell. */
+  updateCellSource: (cellId: string, source: string) => void;
+  /** Update the metadata of a cell. */
+  updateCellMetadata: (cellId: string, metadata: Partial<CellMetadataModel>) => void;
 }
 
 /**
@@ -58,6 +63,8 @@ export interface NotebookAtoms {
    * Throws if the cell id does not exist.
    */
   getCellAtoms: (cellId: string) => NotebookCellAtoms;
+  /** Accessor for the underlying Y.Text backing a cell's source. */
+  getCellYText: (cellId: string) => YText | undefined;
   /** Curated UI actions manipulating cells. */
   actions: NotebookActions;
 }

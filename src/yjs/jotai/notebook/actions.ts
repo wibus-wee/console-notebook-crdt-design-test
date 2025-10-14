@@ -2,7 +2,14 @@ import * as Y from "yjs";
 import { CELL_ID, CELL_KIND, CELL_META, CELL_SOURCE } from "@/yjs/schema/core/keys";
 import { DEFAULT_CELL_METADATA, type CellKind, type YCell, type YNotebook } from "@/yjs/schema/core/types";
 import { insertCell as insertCellMutation, moveCell as moveCellMutation, removeCell as removeCellMutation } from "@/yjs/schema/ops/mutations";
+import { getCell } from "@/yjs/schema/access/accessors";
 import type { InsertCellOptions, NotebookActions } from "./types";
+
+/** Run a function inside a Y.Doc transaction when available. */
+const withTransact = (doc: Y.Doc | null, fn: () => void): void => {
+  if (doc) doc.transact(fn);
+  else fn();
+};
 
 const defaultSourceByKind: Record<CellKind, string> = {
   sql: "SELECT 1;",
@@ -42,5 +49,28 @@ export const createNotebookActions = (nb: YNotebook): NotebookActions => ({
   },
   moveCell: (cellId, toIndex) => {
     moveCellMutation(nb, cellId, toIndex);
+  },
+  updateCellSource: (cellId, source) => {
+    const cell = getCell(nb, cellId);
+    if (cell) {
+      withTransact(nb.doc, () => {
+        const ySource = cell.get(CELL_SOURCE) as Y.Text;
+        if (ySource.toString() !== source) {
+          ySource.delete(0, ySource.length);
+          ySource.insert(0, source);
+        }
+      });
+    }
+  },
+  updateCellMetadata: (cellId, metadata) => {
+    const cell = getCell(nb, cellId);
+    if (cell) {
+      withTransact(nb.doc, () => {
+        const yMeta = cell.get(CELL_META) as Y.Map<any>;
+        if (metadata.backgroundDDL !== undefined && yMeta.get("backgroundDDL") !== metadata.backgroundDDL) {
+          yMeta.set("backgroundDDL", metadata.backgroundDDL);
+        }
+      });
+    }
   },
 });

@@ -1,5 +1,8 @@
 import { useOptionalAwarenessContext, type AwarenessPeer, type AwarenessSelectionRange } from "@/providers/AwarenessProvider";
+import { atom, useAtomValue } from "jotai";
 import { memo, forwardRef, useRef, useMemo, useCallback, useEffect } from "react";
+import { MonacoBinding } from "y-monaco";
+import type { Text as YText } from "yjs";
 import { type MonacoEditorHandle, MonacoEditor, type MonacoEditorProps } from "./monaco-editor";
 import { editor, type IDisposable } from "monaco-editor";
 
@@ -33,6 +36,7 @@ const ensureBaseWidgetStyles = () => {
       box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
       transform: translate(-50%, -120%);
       white-space: nowrap;
+      z-index: 1000;
     }
   `;
   document.head.append(style);
@@ -86,11 +90,12 @@ const assignRef = <T,>(ref: PossibleRef<T>, value: T | null) => {
 
 interface CollaborativeMonacoEditorProps extends MonacoEditorProps {
   awarenessCellId?: string;
+  yText?: YText | null;
 }
 
 export const CollaborativeMonacoEditor = memo(
   forwardRef<MonacoEditorHandle, CollaborativeMonacoEditorProps>(function CollaborativeMonacoEditor(
-    { awarenessCellId, onMount, ...rest },
+    { awarenessCellId, yText, onMount, controlled = true, value, defaultValue, onChange, ...rest },
     ref
   ) {
     const awarenessCtx = useOptionalAwarenessContext();
@@ -101,18 +106,28 @@ export const CollaborativeMonacoEditor = memo(
     const widgetMapRef = useRef<Map<number, { widget: editor.IContentWidget; domNode: HTMLDivElement }>>(new Map());
     const cursorRafRef = useRef<number | null>(null);
     const componentOriginRef = useRef<string>(`monaco-${Math.random().toString(36).slice(2, 10)}`);
+    const bindingRef = useRef<MonacoBinding | null>(null);
+    const lastBoundYTextRef = useRef<YText | null>(null);
+    const shouldBindYText = Boolean(yText);
 
-    const contextPeers = awarenessCtx?.peers ?? [];
+    const peersAtom = awarenessCtx?.peersAtom;
     const setEditingState = awarenessCtx?.setEditingState;
     const setCursorState = awarenessCtx?.setCursorState;
     const getLocalState = awarenessCtx?.getLocalState;
 
     const isAwarenessActive = Boolean(awarenessCtx && awarenessCellId);
 
-    const remoteCursorPeers = useMemo(() => {
-      if (!isAwarenessActive) return [] as AwarenessPeer[];
-      return contextPeers.filter((peer) => peer.cursor?.cellId === awarenessCellId);
-    }, [contextPeers, awarenessCellId, isAwarenessActive]);
+    const filteredPeersAtom = useMemo(() => {
+      if (!isAwarenessActive || !peersAtom) {
+        return atom<AwarenessPeer[]>([]);
+      }
+      return atom((get) => {
+        const peers = get(peersAtom);
+        return peers.filter((peer) => peer.cursor?.cellId === awarenessCellId);
+      });
+    }, [isAwarenessActive, peersAtom, awarenessCellId]);
+
+    const remoteCursorPeers = useAtomValue(filteredPeersAtom);
 
     const handleForwardedRef = useCallback(
       (handle: MonacoEditorHandle | null) => {
@@ -131,6 +146,31 @@ export const CollaborativeMonacoEditor = memo(
       awarenessDisposablesRef.current = [];
     }, []);
 
+    const setupBinding = useCallback(() => {
+      if (typeof window === "undefined") return;
+      const instance = editorInstanceRef.current;
+      if (!instance) return;
+
+      if (bindingRef.current && lastBoundYTextRef.current === yText) {
+        return;
+      }
+
+      if (bindingRef.current) {
+        bindingRef.current.destroy();
+        bindingRef.current = null;
+      }
+      lastBoundYTextRef.current = null;
+
+      if (!yText) return;
+
+      const model = instance.getModel();
+      if (!model) return;
+
+      const editorsSet = new Set<editor.IStandaloneCodeEditor>([instance]);
+      bindingRef.current = new MonacoBinding(yText, model, editorsSet);
+      lastBoundYTextRef.current = yText;
+    }, [yText]);
+
     const scheduleCursorBroadcast = useCallback(
       (immediate = false) => {
         if (!isAwarenessActive || !setCursorState || !getLocalState || !awarenessCellId) return;
@@ -145,7 +185,7 @@ export const CollaborativeMonacoEditor = memo(
             endLineNumber: sel.endLineNumber,
             endColumn: sel.endColumn,
           }));
-
+          
           if (normalized.length === 0) {
             const current = getLocalState();
             if (current.cursor?.cellId === awarenessCellId) {
@@ -153,7 +193,7 @@ export const CollaborativeMonacoEditor = memo(
             }
             return;
           }
-
+          console.log("Broadcasting cursor for cell", awarenessCellId, normalized);
           setCursorState({ cellId: awarenessCellId, selections: normalized });
         };
 
@@ -215,11 +255,16 @@ export const CollaborativeMonacoEditor = memo(
       });
 
       const selectionDisposable = instance.onDidChangeCursorSelection(() => {
+        if (!instance.hasTextFocus()) return;
         scheduleCursorBroadcast();
       });
 
       awarenessDisposablesRef.current.push(focusDisposable, blurDisposable, selectionDisposable);
     }, [awarenessCellId, disposeAwarenessDisposables, getLocalState, isAwarenessActive, scheduleCursorBroadcast, setCursorState, setEditingState]);
+
+    useEffect(() => {
+      setupBinding();
+    }, [setupBinding]);
 
     useEffect(() => {
       attachAwarenessHandlers();
@@ -341,6 +386,11 @@ export const CollaborativeMonacoEditor = memo(
             setEditingState?.(null);
           }
         }
+        if (bindingRef.current) {
+          bindingRef.current.destroy();
+          bindingRef.current = null;
+        }
+        lastBoundYTextRef.current = null;
         editorInstanceRef.current = null;
       };
     }, [awarenessCellId, disposeAwarenessDisposables, getLocalState, setCursorState, setEditingState]);
@@ -349,11 +399,40 @@ export const CollaborativeMonacoEditor = memo(
       (instance: editor.IStandaloneCodeEditor) => {
         editorInstanceRef.current = instance;
         attachAwarenessHandlers();
+        setupBinding();
         onMount?.(instance);
       },
-      [attachAwarenessHandlers, onMount]
+      [attachAwarenessHandlers, onMount, setupBinding]
     );
 
-    return <MonacoEditor {...rest} ref={handleForwardedRef} onMount={handleEditorMount} />;
+    let editorControlProps: Partial<MonacoEditorProps>;
+    if (shouldBindYText) {
+      editorControlProps = {
+        controlled: false,
+        defaultValue: defaultValue ?? value ?? yText?.toString() ?? "",
+      };
+    } else if (controlled) {
+      editorControlProps = {
+        controlled: true,
+        value,
+        onChange,
+        defaultValue,
+      };
+    } else {
+      editorControlProps = {
+        controlled: false,
+        defaultValue,
+        onChange,
+      };
+    }
+
+    return (
+      <MonacoEditor
+        {...rest}
+        {...editorControlProps}
+        ref={handleForwardedRef}
+        onMount={handleEditorMount}
+      />
+    );
   })
 );

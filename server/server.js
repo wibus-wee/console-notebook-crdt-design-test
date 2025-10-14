@@ -7,7 +7,7 @@ import { setupWSConnection } from './utils.js'
 import * as decoding from 'lib0/decoding'
 
 const wss = new WebSocket.Server({ noServer: true })
-const host = process.env.HOST || 'localhost'
+const host = process.env.HOST || '0.0.0.0'
 const port = number.parseInt(process.env.PORT || '1234')
 
 const server = http.createServer((_request, response) => {

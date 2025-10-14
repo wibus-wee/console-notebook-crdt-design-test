@@ -1,3 +1,5 @@
+import { atom, useAtomValue } from "jotai";
+import type { Atom } from "jotai";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Awareness } from "y-protocols/awareness";
 
@@ -45,6 +47,7 @@ interface AwarenessContextValue {
   awareness: Awareness | null;
   localUser: AwarenessUser;
   peers: AwarenessPeer[];
+  peersAtom: Atom<AwarenessPeer[]>;
   updateLocalState: (updater: (prev: AwarenessPayload) => AwarenessPayload) => void;
   setEditingState: (editing: AwarenessEditingState | null) => void;
   setCursorState: (cursor: AwarenessCursorState | null) => void;
@@ -53,17 +56,7 @@ interface AwarenessContextValue {
 
 const AwarenessContext = createContext<AwarenessContextValue | null>(null);
 
-const COLORS = [
-  "#FF6B6B",
-  "#4ECDC4",
-  "#FFD93D",
-  "#5A6FE2",
-  "#FF9F1C",
-  "#9D4EDD",
-  "#2EC4B6",
-  "#F06595",
-];
-
+const COLORS = ["#FF6B6B", "#4ECDC4", "#FFD93D", "#5A6FE2", "#FF9F1C", "#9D4EDD", "#2EC4B6", "#F06595"];
 const ADJECTIVES = ["Swift", "Brave", "Calm", "Clever", "Bright", "Nimble", "Bold", "Misty"];
 const ANIMALS = ["Falcon", "Otter", "Fox", "Panda", "Tiger", "Hawk", "Koala", "Dolphin"];
 
@@ -73,9 +66,10 @@ const createMockUser = (): AwarenessUser => {
   const name = `${randomOf(ADJECTIVES)} ${randomOf(ANIMALS)}`;
   const color = randomOf(COLORS);
   const avatarSeed = Math.random().toString(36).slice(2, 10);
-  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `user-${Math.random().toString(36).slice(2, 11)}`;
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `user-${Math.random().toString(36).slice(2, 11)}`;
   return { id, name, color, avatarSeed };
 };
 
@@ -123,8 +117,24 @@ const readPeers = (awareness: Awareness, selfId: number): AwarenessPeer[] => {
 
 export function AwarenessProvider({ awareness, children }: { awareness: Awareness | null; children: React.ReactNode }) {
   const [localUser] = useState<AwarenessUser>(() => createMockUser());
-  const [peers, setPeers] = useState<AwarenessPeer[]>([]);
   const localStateRef = useRef<AwarenessPayload>({ user: localUser, ts: Date.now() });
+
+  const peersAtom = useMemo(() => {
+    const anAtom = atom<AwarenessPeer[]>([]);
+    anAtom.onMount = (set) => {
+      if (!awareness) {
+        set([]);
+        return;
+      }
+      const syncPeers = () => set(readPeers(awareness, awareness.clientID));
+      awareness.on("change", syncPeers);
+      syncPeers(); // Initial sync
+      return () => awareness.off("change", syncPeers);
+    };
+    return anAtom;
+  }, [awareness]);
+
+  const peers = useAtomValue(peersAtom);
 
   const pushLocalState = useCallback(
     (next: AwarenessPayload) => {
@@ -172,12 +182,6 @@ export function AwarenessProvider({ awareness, children }: { awareness: Awarenes
     if (!awareness) return undefined;
 
     awareness.setLocalState(localStateRef.current);
-    const syncPeers = () => {
-      setPeers(readPeers(awareness, awareness.clientID));
-    };
-
-    syncPeers();
-    awareness.on("change", syncPeers);
 
     const hasWindow = typeof window !== "undefined";
     const handleUnload = () => {
@@ -188,12 +192,10 @@ export function AwarenessProvider({ awareness, children }: { awareness: Awarenes
     if (hasWindow) window.addEventListener("beforeunload", handleUnload);
 
     return () => {
-      awareness.off("change", syncPeers);
       if (hasWindow) window.removeEventListener("beforeunload", handleUnload);
       try {
         awareness.setLocalState(null);
       } catch {}
-      setPeers([]);
     };
   }, [awareness]);
 
@@ -202,12 +204,13 @@ export function AwarenessProvider({ awareness, children }: { awareness: Awarenes
       awareness,
       localUser,
       peers,
+      peersAtom,
       updateLocalState,
       setEditingState,
       setCursorState,
       getLocalState,
     }),
-    [awareness, localUser, peers, updateLocalState, setEditingState, setCursorState, getLocalState],
+    [awareness, localUser, peers, peersAtom, updateLocalState, setEditingState, setCursorState, getLocalState],
   );
 
   return <AwarenessContext.Provider value={value}>{children}</AwarenessContext.Provider>;
