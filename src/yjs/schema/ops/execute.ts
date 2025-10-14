@@ -102,6 +102,8 @@ export const markCellOutputStale = (
     const outputs = getOutputsMap(nb);
     const entry = outputs.get(cellId);
     if (!entry) return;
+    const current = entry.get("stale");
+    if (current === true) return;
     entry.set("stale", true);
   };
   withTransactOptional(nb, apply, opts?.origin ?? EXECUTION_ORIGIN);

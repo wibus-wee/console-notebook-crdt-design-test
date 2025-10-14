@@ -1,14 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { useAtomValue } from "jotai";
 import { useNotebookAtoms, useNotebookStatus, useNotebookYjs } from "@/providers/NotebookProvider";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import {
   buildTombstoneSet,
   classifyOrderEntries,
@@ -19,56 +13,34 @@ import {
 import { validateNotebook } from "@/yjs/schema/quality/validation";
 import { getCellMap, getOrder } from "@/yjs/schema/access/accessors";
 import { tombstonesMap } from "@/yjs/schema/access/tombstone";
+import { YjsTreeViewer } from "./YjsTreeViewer";
 
-const EMPTY_PLACEHOLDER = "—";
-const POSITION_STORAGE_KEY = "notebook-dev-panel-position";
-
-interface Position {
-  x: number;
-  y: number;
-}
-
-export function NotebookDevPanel() {
-  const status = useNotebookStatus();
-  const notebook = useNotebookAtoms();
-  const { notebook: nb, doc, traffic } = useNotebookYjs();
-  const snapshot = useAtomValue(notebook.snapshotAtom);
-  const [open, setOpen] = useState(true);
-
-  // Load initial position from localStorage or use default
-  const [position, setPosition] = useState<Position>(() => {
+/** Utility Hooks **/
+function useLocalStoragePosition(key, defaultPos) {
+  const [position, setPosition] = useState(() => {
     try {
-      const saved = localStorage.getItem(POSITION_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn("Failed to load panel position:", e);
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : defaultPos;
+    } catch {
+      return defaultPos;
     }
-    return { x: window.innerWidth - 696, y: 16 }; // default: right-4 bottom-4 equivalent
   });
-
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startY: number; initialX: number; initialY: number } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  if (!import.meta.env.DEV) {
-    return null;
-  }
-
-  // Save position to localStorage whenever it changes
   useEffect(() => {
     try {
-      localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(position));
-    } catch (e) {
-      console.warn("Failed to save panel position:", e);
-    }
-  }, [position]);
+      localStorage.setItem(key, JSON.stringify(position));
+    } catch {}
+  }, [key, position]);
+  return [position, setPosition];
+}
 
-  // Drag handlers
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Only start drag from the header area
-    if ((e.target as HTMLElement).closest("[data-drag-handle]")) {
+function useDraggablePanel(storageKey) {
+  const [position, setPosition] = useLocalStoragePosition(storageKey, { x: window.innerWidth - 760, y: 16 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef(null);
+  const panelRef = useRef(null);
+
+  const handleMouseDown = useCallback((e) => {
+    if ((e.target.closest("[data-drag-handle]"))) {
       e.preventDefault();
       setIsDragging(true);
       dragRef.current = {
@@ -78,32 +50,21 @@ export function NotebookDevPanel() {
         initialY: position.y,
       };
     }
-  };
+  }, [position]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e) => {
       if (!isDragging || !dragRef.current) return;
-
-      const deltaX = e.clientX - dragRef.current.startX;
-      const deltaY = e.clientY - dragRef.current.startY;
-
-      const newX = dragRef.current.initialX + deltaX;
-      const newY = dragRef.current.initialY + deltaY;
-
-      // Constrain position to viewport with some padding
-      const panelWidth = panelRef.current?.offsetWidth || 680;
+      const { startX, startY, initialX, initialY } = dragRef.current;
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      const newX = initialX + deltaX;
+      const newY = initialY + deltaY;
+      const panelWidth = panelRef.current?.offsetWidth || 720;
       const panelHeight = panelRef.current?.offsetHeight || 400;
       const padding = 16;
-
-      const constrainedX = Math.max(
-        padding,
-        Math.min(newX, window.innerWidth - panelWidth - padding)
-      );
-      const constrainedY = Math.max(
-        padding,
-        Math.min(newY, window.innerHeight - panelHeight - padding)
-      );
-
+      const constrainedX = Math.max(padding, Math.min(newX, window.innerWidth - panelWidth - padding));
+      const constrainedY = Math.max(padding, Math.min(newY, window.innerHeight - panelHeight - padding));
       setPosition({ x: constrainedX, y: constrainedY });
     };
 
@@ -115,11 +76,9 @@ export function NotebookDevPanel() {
     if (isDragging) {
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
-      // Prevent text selection while dragging
       document.body.style.userSelect = "none";
       document.body.style.cursor = "grabbing";
     }
-
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
@@ -128,7 +87,11 @@ export function NotebookDevPanel() {
     };
   }, [isDragging, position]);
 
-  const report = useMemo(() => {
+  return { position, setPosition, isDragging, handleMouseDown, panelRef };
+}
+
+function useNotebookReport(nb, snapshot) {
+  return useMemo(() => {
     const orderArr = getOrder(nb).toArray();
     const map = getCellMap(nb);
     const tomb = tombstonesMap(nb);
@@ -139,319 +102,296 @@ export function NotebookDevPanel() {
     const orphans = findOrphansToAppend(map, keptSet, tombSet, options);
     const deleteRanges = mergeDeleteIndexesToRanges(classification.indexesToDelete);
     const validationIssues = validateNotebook(nb);
-
     return {
       orderLength: orderArr.length,
       cellCount: map.size,
       tombstoneCount: tombSet.size,
-      reconcile: {
-        options,
-        classification,
-        orphans,
-        deleteRanges,
-        wouldChange: deleteRanges.length > 0 || orphans.length > 0,
-      },
+      snapshotCount: Object.keys(snapshot.cells).length,
+      reconcile: { options, classification, orphans, deleteRanges, wouldChange: deleteRanges.length > 0 || orphans.length > 0 },
       validationIssues,
     };
   }, [snapshot, nb]);
+}
 
-  const renderStringList = (items: string[]) => {
-    if (!items.length) return EMPTY_PLACEHOLDER;
-    return items.join(", ");
-  };
-
+function PanelHeader({ onClose, status, doc }) {
   return (
     <div
-      ref={panelRef}
-      className="fixed z-50"
-      style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-      }}
+      data-drag-handle
+      className={cn(
+        "flex items-center justify-between border-b border-border/60 bg-muted/30 backdrop-blur-sm",
+        "px-4 py-3 select-none"
+      )}
     >
-      {open ? (
-        <Card
-          className={cn(
-            "w-[680px] max-h-[70vh] overflow-hidden border-border/80 bg-background/95 backdrop-blur shadow-lg transition-all duration-300 ease-out animate-in fade-in slide-in-from-top-2",
-            isDragging && "shadow-2xl ring-2 ring-primary/50"
-          )}
-          onMouseDown={handleMouseDown}
+      {/* 左侧标题区域 */}
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <DotsGridIcon className="w-4 h-4 opacity-60" />
+          <span>Notebook Dev Panel</span>
+        </div>
+        <div className="text-[11px] text-muted-foreground font-mono">
+          Status: <span className="text-foreground/90">{status}</span> ·{" "}
+          Doc <span className="text-foreground/80">{doc.guid}</span> · Client{" "}
+          <span className="text-foreground/80">{doc.clientID}</span>
+        </div>
+      </div>
+
+      {/* 右侧控制区 */}
+      <div className="flex items-center gap-2">
+        <button
+          title="Minimize"
+          onClick={onClose}
+          className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
         >
-          <CardHeader className="pb-4 relative">
-            <div
-              data-drag-handle
-              className="absolute inset-0 cursor-grab active:cursor-grabbing"
-              title="Drag to move panel"
-            />
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 relative z-10 pointer-events-none">
-                <CardTitle className="flex items-center gap-2">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4 opacity-50"
-                  >
-                    <circle cx="9" cy="5" r="1" />
-                    <circle cx="9" cy="12" r="1" />
-                    <circle cx="9" cy="19" r="1" />
-                    <circle cx="15" cy="5" r="1" />
-                    <circle cx="15" cy="12" r="1" />
-                    <circle cx="15" cy="19" r="1" />
-                  </svg>
-                  Notebook Dev Panel
-                </CardTitle>
-                <CardDescription className="mt-1.5">
-                  Status: {status}. Doc {doc.guid} · Client {doc.clientID}
-                </CardDescription>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                }}
-                className="relative z-20 pointer-events-auto rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-                title="Minimize panel"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-4 h-4"
-                >
-                  <path d="M19 12H5" />
-                </svg>
-              </button>
-            </div>
-          </CardHeader>
-          <CardContent className="overflow-y-auto pb-4 pr-3">
-            <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr]">
-              <div className="space-y-4">
-                <section>
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notebook</h4>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                <StatTile label="Order" value={report.orderLength} />
-                <StatTile label="Cells" value={report.cellCount} />
-                <StatTile label="Tombstones" value={report.tombstoneCount} />
-                <StatTile label="Snapshot Cells" value={Object.keys(snapshot.cells).length} />
-              </div>
-              <div className="mt-3 text-[10px] text-muted-foreground">
-                Title: <span className="font-mono text-foreground">{snapshot.title}</span>
-              </div>
-                </section>
+          <MinusIcon className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
-                <section>
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reconcile Preview</h4>
-              <div className="mt-2 space-y-2 text-xs">
-                <div className="rounded-lg border border-border/60 bg-muted/40 p-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-foreground">Would Change</span>
-                    <span className={cn("font-mono", report.reconcile.wouldChange ? "text-amber-500" : "text-muted-foreground")}> 
-                      {report.reconcile.wouldChange ? "Yes" : "No"}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                    <div>
-                      <div className="text-muted-foreground">Delete Ops</div>
-                      <div className="font-mono">{report.reconcile.deleteRanges?.length ?? 0}</div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Orphans</div>
-                      <div className="font-mono">{report.reconcile.orphans.length}</div>
-                    </div>
-                  </div>
-                </div>
 
-                {report.reconcile.deleteRanges.length > 0 && (
-                  <div>
-                    <div className="text-[11px] font-medium text-foreground">Delete Ranges</div>
-                    <ul className="mt-1 space-y-1 text-[10px] font-mono">
-                      {report.reconcile.deleteRanges.map((range, idx) => (
-                        <li key={`${range.start}-${range.len}-${idx}`} className="rounded bg-muted/60 px-2 py-1">
-                          [{range.start} → {range.start + range.len - 1}] · len {range.len}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+function TabBar({ activeTab, onChange }) {
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "structure", label: "Structure" },
+    { id: "traffic", label: "Traffic" },
+    { id: "validation", label: "Validation" },
+  ];
+  return (
+    <div className="flex border-b border-border/70 text-xs bg-muted/30">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+          className={cn(
+            "px-4 py-2 transition-colors",
+            activeTab === tab.id
+              ? "text-foreground border-b-2 border-primary"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
+function StatTile({ label, value }) {
+  return (
+    <div className="rounded border border-border/50 bg-muted/30 p-3">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function OverviewTab({ report, snapshot }) {
+  return (
+    <div className="space-y-6">
+      <section>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Notebook Stats</h4>
+        <div className="grid grid-cols-4 gap-2">
+          <StatTile label="Order" value={report.orderLength} />
+          <StatTile label="Cells" value={report.cellCount} />
+          <StatTile label="Tombstones" value={report.tombstoneCount} />
+          <StatTile label="Snapshot" value={report.snapshotCount} />
+        </div>
+      </section>
+
+      <section>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Reconcile Preview</h4>
+        <div className="rounded border border-border/50 bg-muted/30 p-3 text-xs">
+          <div className="flex justify-between">
+            <span>Would Change</span>
+            <span className={report.reconcile.wouldChange ? "text-amber-500" : "text-muted-foreground"}>
+              {report.reconcile.wouldChange ? "Yes" : "No"}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div>Delete Ops: {report.reconcile.deleteRanges.length}</div>
+            <div>Orphans: {report.reconcile.orphans.length}</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StructureTab({ nb, doc }) {
+  return (
+    <div className="p-2 border border-border/50 bg-muted/30 rounded">
+      <YjsTreeViewer notebook={nb} doc={doc} />
+    </div>
+  );
+}
+
+function TrafficTab({ traffic }) {
+  return (
+    <ul className="space-y-2 text-xs">
+      {[...traffic].reverse().map((entry) => (
+        <li key={entry.id} className="rounded border border-border/50 bg-muted/30 p-2">
+          {/* Header */}
+          <div className="flex justify-between text-muted-foreground">
+            <span>
+              {entry.direction === "incoming" ? "← Incoming" : "→ Outgoing"}
+            </span>
+            <span>{new Date(entry.ts).toLocaleTimeString()}</span>
+          </div>
+
+          {/* Type */}
+          <div className="font-mono text-foreground mt-1">{entry.type}</div>
+
+          {/* Details */}
+          {entry.details && (
+            <p className="text-muted-foreground mt-1 font-mono break-words">
+              {entry.details}
+            </p>
+          )}
+
+          {/* Preview */}
+          {entry.preview && (
+            <p className="mt-1 text-[11px] text-muted-foreground font-mono">
+              {entry.preview}
+            </p>
+          )}
+
+          {/* Decoded update details */}
+          {entry.decoded && entry.type === "update" && (
+            <details
+              className="mt-2 rounded border border-border/40 bg-background/80 px-2 py-2"
+              defaultOpen={entry.decoded.structs.length <= 12}
+            >
+              <summary className="cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Decoded Update · {entry.decoded.structs.length} structs
+                {entry.decoded.deletes.length > 0
+                  ? ` · deletes ${entry.decoded.deletes.length}`
+                  : ""}
+              </summary>
+
+              <div className="mt-2 space-y-2">
                 <div>
-                  <div className="text-[11px] font-medium text-foreground">Orphans to Append</div>
-                  <p className="mt-1 text-[10px] font-mono text-muted-foreground">
-                    {renderStringList(report.reconcile.orphans)}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  <InfoList title="Missing" items={report.reconcile.classification.removedMissingFromMap} />
-                  <InfoList title="Tombstoned" items={report.reconcile.classification.removedTombstoned} />
-                  <InfoList title="Duplicates" items={report.reconcile.classification.removedDuplicates} />
-                  <InfoList title="Invalid" items={report.reconcile.classification.removedInvalid} />
-                </div>
-                </div>
-              </section>
-
-                <section>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</h4>
-              {report.validationIssues.length === 0 ? (
-                <p className="mt-2 text-[11px] text-emerald-500">No issues detected.</p>
-              ) : (
-                <ul className="mt-2 space-y-2">
-                  {report.validationIssues.map((issue, idx) => (
-                    <li
-                      key={`${issue.path}-${idx}`}
-                      className={cn(
-                        "rounded border px-2 py-1 text-[11px] leading-snug",
-                        issue.level === "error"
-                          ? "border-destructive/60 text-destructive"
-                          : "border-amber-500/60 text-amber-500"
-                      )}
-                    >
-                      <div className="font-mono">{issue.path}</div>
-                      <div>{issue.message}</div>
-                    </li>
-                  ))}
-                </ul>
-                )}
-              </section>
-              </div>
-
-              <div className="space-y-4">
-                <section>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Traffic</h4>
-                  <div className="mt-2 space-y-2 text-[10px]">
-                    {traffic.length === 0 ? (
-                      <p className="text-muted-foreground">No events yet.</p>
-                    ) : (
-                      <ul className="max-h-56 space-y-1 overflow-y-auto pr-1">
-                        {[...traffic]
-                          .reverse()
-                          .map((entry) => (
-                            <li
-                              key={entry.id}
-                              className="rounded border border-border/50 bg-muted/40 px-2 py-1"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span
-                                  className={cn(
-                                    "font-semibold",
-                                    entry.direction === "incoming"
-                                      ? "text-emerald-500"
-                                      : "text-sky-500"
-                                  )}
-                                >
-                                  {entry.direction === "incoming" ? "← incoming" : "→ outgoing"}
-                                </span>
-                                <span className="font-mono text-muted-foreground">
-                                  {formatClock(entry.ts)}
-                                </span>
-                              </div>
-                              <div className="mt-1 flex items-center justify-between">
-                                <span className="font-medium text-foreground">{entry.type}</span>
-                                {typeof entry.size === "number" && (
-                                  <span className="font-mono text-muted-foreground">{entry.size} bytes</span>
-                                )}
-                              </div>
-                              <p className="mt-1 font-mono text-[10px] text-foreground">
-                                {entry.details || EMPTY_PLACEHOLDER}
-                              </p>
-                              {entry.preview && (
-                                <p className="font-mono text-[9px] text-muted-foreground">
-                                  {entry.preview}
-                                </p>
-                              )}
-                            </li>
-                          ))}
-                      </ul>
-                    )}
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+                    Structs
                   </div>
-                </section>
+                  <ul className="mt-1 space-y-1">
+                    {entry.decoded.structs.map((struct) => (
+                      <li
+                        key={`${struct.index}-${struct.summary}`}
+                        className="rounded border border-border/30 bg-muted/60 px-2 py-1"
+                      >
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                          <span className="font-mono">#{struct.index}</span>
+                          <span className="font-semibold text-foreground">
+                            {struct.type}
+                          </span>
+                        </div>
+                        <p className="mt-1 break-words font-mono text-[10px] text-foreground">
+                          {struct.summary}
+                        </p>
+                        {struct.details?.map((line, idx) => (
+                          <p
+                            key={`${struct.index}-${idx}`}
+                            className="break-words font-mono text-[10px] text-muted-foreground"
+                          >
+                            {line}
+                          </p>
+                        ))}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
-                <section>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Order Trace</h4>
-                  <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-mono">
-                    {snapshot.order.length === 0 ? (
-                      <span className="text-muted-foreground">{EMPTY_PLACEHOLDER}</span>
-                    ) : (
-                      snapshot.order.map((id) => (
-                        <span key={id} className="rounded bg-muted/60 px-2 py-1 text-foreground">
-                          {id}
+                {entry.decoded.deletes.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+                      Delete Set
+                    </div>
+                    <div className="mt-1 grid gap-1">
+                      {entry.decoded.deletes.map((del, idx) => (
+                        <span
+                          key={`${del.client}-${del.clock}-${idx}`}
+                          className="font-mono text-[10px] text-muted-foreground"
+                        >
+                          client:{del.client} · clock:{del.clock} · len:{del.len}
                         </span>
-                      ))
-                    )}
+                      ))}
+                    </div>
                   </div>
-                </section>
+                )}
               </div>
-            </div>
+            </details>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+
+function ValidationTab({ issues }) {
+  if (issues.length === 0)
+    return <p className="text-xs text-emerald-500">No validation issues.</p>;
+  return (
+    <ul className="space-y-1 text-xs">
+      {issues.map((i, idx) => (
+        <li key={idx} className={cn("rounded border p-2", i.level === "error" ? "border-red-500 text-red-500" : "border-amber-500 text-amber-500")}> 
+          <div className="font-mono">{i.path}</div>
+          <div>{i.message}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function NotebookDevPanel() {
+  const { notebook: nb, doc, traffic } = useNotebookYjs();
+  const notebook = useNotebookAtoms();
+  const snapshot = useAtomValue(notebook.snapshotAtom);
+  const status = useNotebookStatus();
+  const { position, handleMouseDown, panelRef } = useDraggablePanel("notebook-dev-panel-pos");
+  const [open, setOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
+  const report = useNotebookReport(nb, snapshot);
+
+  if (!import.meta.env.DEV) return null;
+
+  return (
+    <div ref={panelRef} style={{ left: position.x, top: position.y }} className="fixed z-50">
+      {open ? (
+        <Card onMouseDown={handleMouseDown} className="w-[720px] max-h-[75vh] overflow-hidden bg-background/95 backdrop-blur border border-border/70 shadow-lg rounded-xl">
+          <PanelHeader onClose={() => setOpen(false)} status={status} doc={doc} />
+          <TabBar activeTab={activeTab} onChange={setActiveTab} />
+          <CardContent className="p-4 max-h-[calc(75vh-80px)] overflow-y-auto pb-8">
+            {activeTab === "overview" && <OverviewTab report={report} snapshot={snapshot} />}
+            {activeTab === "structure" && <StructureTab nb={nb} doc={doc} />}
+            {activeTab === "traffic" && <TrafficTab traffic={traffic} />}
+            {activeTab === "validation" && <ValidationTab issues={report.validationIssues} />}
           </CardContent>
         </Card>
       ) : (
-        <button
-          onClick={() => setOpen(true)}
-          className={cn(
-            "group relative rounded-lg border border-border/80 bg-background/95 backdrop-blur p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105",
-            "flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-          )}
-          title="Open Dev Panel"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-5 h-5"
-          >
-            <circle cx="9" cy="5" r="1" />
-            <circle cx="9" cy="12" r="1" />
-            <circle cx="9" cy="19" r="1" />
-            <circle cx="15" cy="5" r="1" />
-            <circle cx="15" cy="12" r="1" />
-            <circle cx="15" cy="19" r="1" />
-          </svg>
-          <span className="text-xs">Dev</span>
-          <div className="absolute -right-1 -top-1 w-2 h-2 rounded-full bg-primary animate-pulse" />
+        <button onClick={() => setOpen(true)} className="rounded-lg border border-border/70 bg-background/95 backdrop-blur p-3 flex items-center gap-2 shadow hover:shadow-lg transition-all">
+          <DotsGridIcon className="w-4 h-4 opacity-70" />
+          <span className="text-xs font-medium">Dev</span>
         </button>
       )}
     </div>
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function DotsGridIcon(props) {
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/50 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
-    </div>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="9" cy="5" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="5" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="19" r="1" />
+    </svg>
   );
 }
 
-function InfoList({ title, items }: { title: string; items: string[] }) {
+function MinusIcon(props) {
   return (
-    <div>
-      <div className="text-[11px] font-medium text-foreground">{title}</div>
-      <p className="mt-1 min-h-[20px] text-[10px] font-mono text-muted-foreground">
-        {items.length ? items.join(", ") : EMPTY_PLACEHOLDER}
-      </p>
-    </div>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M19 12H5" />
+    </svg>
   );
-}
-
-function formatClock(ts: number) {
-  return new Date(ts).toLocaleTimeString([], {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }
