@@ -2,9 +2,9 @@ import { useOptionalAwarenessContext, type AwarenessPeer, type AwarenessSelectio
 import { atom, useAtomValue } from "jotai";
 import { memo, forwardRef, useRef, useMemo, useCallback, useEffect } from "react";
 import { MonacoBinding } from "y-monaco";
-import type { Text as YText } from "yjs";
+import type { Text as YText, UndoManager } from "yjs";
 import { type MonacoEditorHandle, MonacoEditor, type MonacoEditorProps } from "./monaco-editor";
-import { editor, type IDisposable } from "monaco-editor";
+import { editor, KeyCode, type IDisposable } from "monaco-editor";
 
 const peerStyleRegistry = new Map<string, { selectionClass: string; caretClass: string; widgetClass: string }>();
 let baseWidgetStylesInjected = false;
@@ -91,11 +91,12 @@ const assignRef = <T,>(ref: PossibleRef<T>, value: T | null) => {
 interface CollaborativeMonacoEditorProps extends MonacoEditorProps {
   awarenessCellId?: string;
   yText?: YText | null;
+  undoManager?: UndoManager | null;
 }
 
 export const CollaborativeMonacoEditor = memo(
   forwardRef<MonacoEditorHandle, CollaborativeMonacoEditorProps>(function CollaborativeMonacoEditor(
-    { awarenessCellId, yText, onMount, controlled = true, value, defaultValue, onChange, ...rest },
+    { awarenessCellId, yText, onMount, controlled = true, value, defaultValue, onChange, undoManager, ...rest },
     ref
   ) {
     const awarenessCtx = useOptionalAwarenessContext();
@@ -108,6 +109,7 @@ export const CollaborativeMonacoEditor = memo(
     const componentOriginRef = useRef<string>(`monaco-${Math.random().toString(36).slice(2, 10)}`);
     const bindingRef = useRef<MonacoBinding | null>(null);
     const lastBoundYTextRef = useRef<YText | null>(null);
+    const undoKeybindingDisposableRef = useRef<IDisposable | null>(null);
     const shouldBindYText = Boolean(yText);
 
     const peersAtom = awarenessCtx?.peersAtom;
@@ -377,6 +379,12 @@ export const CollaborativeMonacoEditor = memo(
           });
           widgetMapRef.current.clear();
         }
+        if (undoKeybindingDisposableRef.current) {
+          try {
+            undoKeybindingDisposableRef.current.dispose();
+          } catch {}
+          undoKeybindingDisposableRef.current = null;
+        }
         if (awarenessCellId && getLocalState) {
           const current = getLocalState();
           if (current.cursor?.cellId === awarenessCellId) {
@@ -395,15 +403,48 @@ export const CollaborativeMonacoEditor = memo(
       };
     }, [awarenessCellId, disposeAwarenessDisposables, getLocalState, setCursorState, setEditingState]);
 
+    const updateUndoBinding = useCallback(
+      (instance: editor.IStandaloneCodeEditor | null) => {
+        if (undoKeybindingDisposableRef.current) {
+          try {
+            undoKeybindingDisposableRef.current.dispose();
+          } catch {}
+          undoKeybindingDisposableRef.current = null;
+        }
+        if (!instance || !undoManager) return;
+        const disposable = instance.onKeyDown((event) => {
+          const usesModifier = event.metaKey || event.ctrlKey;
+          if (!usesModifier) return;
+          const isUndo = !event.shiftKey && event.keyCode === KeyCode.KeyZ;
+          const isRedo = event.keyCode === KeyCode.KeyY || (event.shiftKey && event.keyCode === KeyCode.KeyZ);
+          if (!isUndo && !isRedo) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (isUndo) {
+            undoManager.undo();
+          } else {
+            undoManager.redo();
+          }
+        });
+        undoKeybindingDisposableRef.current = disposable;
+      },
+      [undoManager]
+    );
+
     const handleEditorMount = useCallback(
       (instance: editor.IStandaloneCodeEditor) => {
         editorInstanceRef.current = instance;
         attachAwarenessHandlers();
         setupBinding();
+        updateUndoBinding(instance);
         onMount?.(instance);
       },
-      [attachAwarenessHandlers, onMount, setupBinding]
+      [attachAwarenessHandlers, onMount, setupBinding, updateUndoBinding]
     );
+
+    useEffect(() => {
+      updateUndoBinding(editorInstanceRef.current ?? null);
+    }, [updateUndoBinding]);
 
     let editorControlProps: Partial<MonacoEditorProps>;
     if (shouldBindYText) {

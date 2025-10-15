@@ -6,6 +6,7 @@ import type { YNotebook } from "@/yjs/schema/core/types";
 import { useYProvider, type WsTrafficEntry } from "./WebsocketProvider";
 import { AwarenessProvider } from "./AwarenessProvider";
 import { createNotebookUndoManager } from "@/yjs/schema/quality/undo";
+import { MonacoBinding } from "y-monaco";
 import type { UndoManager } from "yjs";
 import { NotebookUndoHistory } from "@/yjs/undo/notebookUndoHistory";
 import { CELL_ID_GUARD_ORIGIN, EXECUTION_ORIGIN, MAINT_ORIGIN, USER_ACTION_ORIGIN, VACUUM_ORIGIN } from "@/yjs/schema";
@@ -48,9 +49,23 @@ export function NotebookProvider({
     setNotebook(root);
   }, [doc, connect, syncedOnce, status, notebook]);
 
-  const undoManager = useMemo(() => (notebook ? createNotebookUndoManager(notebook, {
-    trackedOrigins: new Set([null, USER_ACTION_ORIGIN, VACUUM_ORIGIN, MAINT_ORIGIN, CELL_ID_GUARD_ORIGIN, EXECUTION_ORIGIN]),
-  }) : null), [notebook]);
+  const undoManager = useMemo(
+    () =>
+      notebook
+        ? createNotebookUndoManager(notebook, {
+            trackedOrigins: new Set([
+              null,
+              USER_ACTION_ORIGIN,
+              MonacoBinding, // MonacoBinding uses its own origin, we need to track it to make editor changes undoable
+              VACUUM_ORIGIN,
+              MAINT_ORIGIN,
+              CELL_ID_GUARD_ORIGIN,
+              EXECUTION_ORIGIN,
+            ]),
+          })
+        : null,
+    [notebook]
+  );
 
   useEffect(() => () => {
     undoManager?.destroy();

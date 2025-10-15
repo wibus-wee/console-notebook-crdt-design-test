@@ -1,7 +1,7 @@
 import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import type { NotebookCellAtoms } from "@/yjs/jotai/notebookAtoms";
-import { useNotebookAtoms, useNotebookYjs } from "@/providers/NotebookProvider";
+import { useNotebookAtoms, useNotebookYjs, useNotebookUndoManager } from "@/providers/NotebookProvider";
 import { CollaborativeMonacoEditor } from "@/components/collaborative-monaco-editor";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +15,7 @@ interface SqlCellEditorProps {
 export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
   const { actions, getCellYText } = useNotebookAtoms();
   const { notebook } = useNotebookYjs();
+  const undoManager = useNotebookUndoManager();
   const cellId = useAtomValue(cellAtoms.idAtom);
   const source = useAtomValue(cellAtoms.sourceAtom);
   const metadata = useAtomValue(cellAtoms.metadataAtom);
@@ -174,6 +175,7 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
         maxHeight={420}
         awarenessCellId={cellId}
         className="rounded-lg border border-border shadow-sm"
+        undoManager={undoManager}
       />
     </div>
   );

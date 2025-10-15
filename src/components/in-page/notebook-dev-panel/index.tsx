@@ -38,7 +38,7 @@ export function NotebookDevPanel() {
       {open ? (
         <Card
           className={cn(
-            "relative flex h-full w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-background/50 shadow-lg backdrop-blur",
+            "relative flex h-full w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-background/95 shadow-lg backdrop-blur",
             isResizing && "select-none"
           )}
         >
