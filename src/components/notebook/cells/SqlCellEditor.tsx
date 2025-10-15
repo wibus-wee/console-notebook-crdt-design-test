@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { startExecuteCell, applyExecuteResultForCurrentRun } from "@/yjs/schema/ops/execute";
 import type { QueryResponse } from "@/yjs/api-gen-type";
+import { SqlCellOutput } from "./SqlCellOutput";
 
 interface SqlCellEditorProps {
   cellAtoms: NotebookCellAtoms;
@@ -177,6 +178,8 @@ export const SqlCellEditor = ({ cellAtoms }: SqlCellEditorProps) => {
         className="rounded-lg border border-border shadow-sm"
         undoManager={undoManager}
       />
+
+      <SqlCellOutput output={output} />
     </div>
   );
 };
