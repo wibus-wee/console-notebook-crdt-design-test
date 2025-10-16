@@ -15,11 +15,10 @@
   │   ├── quality/       # 质量保证（reconcile, validation, undo, auto_stale）
   │   ├── migrate/       # Schema 版本迁移框架
   │   └── bootstrap.ts   # 文档初始化
-  └── jotai/            # Yjs ↔ Jotai 状态管理桥接
+  └── jotai/            # Yjs ↔ Jotai 状态管理桥接 (vibe code)
 
   tests/
   ├── schemas/          # Schema 功能测试
-  ├── jotai/           # Jotai 集成测试
   └── e2e/             # 端到端测试
 ```
 
