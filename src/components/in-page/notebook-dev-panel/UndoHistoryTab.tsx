@@ -1,12 +1,14 @@
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import { useNotebookUndoHistory, useNotebookUndoManager } from "@/providers/NotebookProvider";
-import type { UndoScopeSummary } from "@/yjs/undo/notebookUndoHistory";
+import type { UndoManager } from "yjs";
+import type { UndoHistorySnapshot, UndoScopeSummary } from "@/yjs/undo/notebookUndoHistory";
 
-export function UndoHistoryTab() {
-  const history = useNotebookUndoHistory();
-  const undoManager = useNotebookUndoManager();
+type UndoHistoryTabProps = {
+  history: UndoHistorySnapshot;
+  undoManager: Pick<UndoManager, "undo" | "redo" | "stopCapturing" | "clear">;
+};
 
+export function UndoHistoryTab({ history, undoManager }: UndoHistoryTabProps) {
   const handleUndo = () => {
     if (history.canUndo) {
       undoManager.undo();

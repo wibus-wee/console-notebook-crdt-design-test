@@ -1,12 +1,6 @@
 import { useState } from "react";
-import { useAtomValue } from "jotai";
 import { Card, CardContent } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
-import {
-  useNotebookAtoms,
-  useNotebookStatus,
-  useNotebookYjs,
-} from "@/providers/NotebookProvider";
 import { DotsGridIcon } from "./icons";
 import { OverviewTab } from "./OverviewTab";
 import { PanelHeader } from "./PanelHeader";
@@ -15,20 +9,111 @@ import { TabBar } from "./TabBar";
 import { TrafficTab } from "./TrafficTab";
 import { UndoHistoryTab } from "./UndoHistoryTab";
 import { ValidationTab } from "./ValidationTab";
-import { useNotebookReport, useResizablePanel } from "./hooks";
+import { useResizablePanel } from "./hooks";
+import type { NotebookReport } from "./hooks";
+import type { YNotebook } from "@/yjs/schema/core/types";
+import type { Doc as YDoc } from "yjs";
+import type { UndoHistorySnapshot } from "@/yjs/undo/notebookUndoHistory";
+import type { UndoManager } from "yjs";
 import { AwarenessTab } from "./AwarenessTab";
 
-export function NotebookDevPanel() {
-  const { notebook: nb, doc, traffic } = useNotebookYjs();
-  const notebook = useNotebookAtoms();
-  const snapshot = useAtomValue(notebook.snapshotAtom);
-  const status = useNotebookStatus();
-  const { size, handleResizeStart, isResizing } = useResizablePanel("notebook-dev-panel-size", { width: 720, height: 420 });
-  const [open, setOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
-  const report = useNotebookReport(nb, snapshot);
+export type NotebookStatus = "connecting" | "connected" | "disconnected";
 
-  if (!import.meta.env.DEV) return null;
+export type AwarenessSelectionRange = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+};
+
+export type AwarenessEditingState = {
+  cellId?: string;
+  isMonaco?: boolean;
+  origin?: string;
+};
+
+export type AwarenessCursorState = {
+  cellId?: string;
+  selections: AwarenessSelectionRange[];
+};
+
+export type AwarenessUser = {
+  id: string;
+  name: string;
+  color: string;
+  avatarSeed: string;
+};
+
+export type AwarenessPresence = {
+  clientId: number;
+  user: AwarenessUser;
+  editing?: AwarenessEditingState;
+  cursor?: AwarenessCursorState;
+  ts: number;
+};
+
+export type AwarenessPanelData = {
+  self?: AwarenessPresence;
+  peers: AwarenessPresence[];
+};
+
+export type DevPanelTrafficEntry = {
+  id: number;
+  ts: number;
+  type: "update" | "awareness";
+  direction: "incoming" | "outgoing";
+  size?: number;
+  details: string;
+  preview?: string;
+  decoded?: {
+    structs: Array<{
+      index: number;
+      type: string;
+      summary: string;
+      details?: string[];
+    }>;
+    deletes: Array<{
+      client: number;
+      clock: number;
+      len: number;
+    }>;
+  };
+};
+
+export type NotebookDevPanelProps = {
+  notebook: YNotebook;
+  doc: YDoc;
+  status: NotebookStatus;
+  report: NotebookReport;
+  undoHistory: UndoHistorySnapshot;
+  undoManager: Pick<UndoManager, "undo" | "redo" | "stopCapturing" | "clear">;
+  traffic?: DevPanelTrafficEntry[];
+  awareness?: AwarenessPanelData;
+  resizableStorageKey?: string;
+  defaultSize?: { width: number; height: number };
+  defaultOpen?: boolean;
+  isDev?: boolean;
+};
+
+export function NotebookDevPanel({
+  notebook,
+  doc,
+  status,
+  report,
+  undoHistory,
+  undoManager,
+  traffic = [],
+  awareness,
+  resizableStorageKey = "notebook-dev-panel-size",
+  defaultSize = { width: 720, height: 420 },
+  defaultOpen = true,
+  isDev = import.meta.env.DEV,
+}: NotebookDevPanelProps) {
+  const { size, handleResizeStart, isResizing } = useResizablePanel(resizableStorageKey, defaultSize);
+  const [open, setOpen] = useState(defaultOpen);
+  const [activeTab, setActiveTab] = useState("overview");
+
+  if (!isDev) return null;
 
   return (
     <div
@@ -47,9 +132,9 @@ export function NotebookDevPanel() {
           <CardContent className="flex-1 overflow-hidden p-4 pb-8">
             <div className="h-full overflow-y-auto">
               {activeTab === "overview" && <OverviewTab report={report} />}
-              {activeTab === "structure" && <StructureTab nb={nb} doc={doc} />}
-              {activeTab === "awareness" && <AwarenessTab />}
-              {activeTab === "undo" && <UndoHistoryTab />}
+              {activeTab === "structure" && <StructureTab nb={notebook} doc={doc} />}
+              {activeTab === "awareness" && <AwarenessTab data={awareness} />}
+              {activeTab === "undo" && <UndoHistoryTab history={undoHistory} undoManager={undoManager} />}
               {activeTab === "traffic" && <TrafficTab traffic={traffic} />}
               {activeTab === "validation" && <ValidationTab issues={report.validationIssues} />}
             </div>

@@ -1,7 +1,7 @@
-import type { WsTrafficEntry } from "@/providers/WebsocketProvider";
+import type { DevPanelTrafficEntry } from ".";
 
 type TrafficTabProps = {
-  traffic: WsTrafficEntry[];
+  traffic: DevPanelTrafficEntry[];
 };
 
 export function TrafficTab({ traffic }: TrafficTabProps) {

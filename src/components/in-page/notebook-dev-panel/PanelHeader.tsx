@@ -1,8 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { Doc as YDoc } from "yjs";
 import { MinusIcon } from "./icons";
-
-type NotebookStatus = "connecting" | "connected" | "disconnected";
+import type { NotebookStatus } from ".";
 
 type PanelHeaderProps = {
   onClose: () => void;

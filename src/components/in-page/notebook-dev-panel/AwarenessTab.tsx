@@ -1,84 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  type AwarenessCursorState,
-  type AwarenessEditingState,
-  type AwarenessPayload,
-  type AwarenessPeer,
-  useAwarenessContext,
-} from "@/providers/AwarenessProvider";
+import type { AwarenessPanelData, AwarenessPresence } from ".";
 
-type PresenceEntry = {
-  clientId: number;
-  user: AwarenessPeer["user"];
-  editing?: AwarenessEditingState;
-  cursor?: AwarenessCursorState;
-  ts: number;
-  isSelf?: boolean;
+type AwarenessTabProps = {
+  data?: AwarenessPanelData;
 };
 
-export function AwarenessTab() {
-  const { awareness, localUser, peers, getLocalState } = useAwarenessContext();
-  const [localState, setLocalState] = useState<AwarenessPayload>(() => getLocalState());
-
-  useEffect(() => {
-    if (!awareness) {
-      return;
-    }
-
-    const sync = () => {
-      setLocalState(getLocalState());
-    };
-
-    sync();
-    awareness.on("change", sync);
-    awareness.on("update", sync);
-
-    return () => {
-      awareness.off("change", sync);
-      awareness.off("update", sync);
-    };
-  }, [awareness, getLocalState]);
-
-  const sortedPeers = useMemo(() => [...peers].sort((a, b) => b.ts - a.ts), [peers]);
-
-  const localPresence: PresenceEntry = {
-    clientId: awareness?.clientID ?? 0,
-    user: localUser,
-    editing: localState.editing,
-    cursor: localState.cursor,
-    ts: localState.ts,
-    isSelf: true,
-  };
-
-  const peerPresence = useMemo<PresenceEntry[]>(
-    () =>
-      sortedPeers.map((peer) => ({
-        clientId: peer.clientId,
-        user: peer.user,
-        editing: peer.editing,
-        cursor: peer.cursor,
-        ts: peer.ts,
-      })),
-    [sortedPeers],
-  );
-
+export function AwarenessTab({ data }: AwarenessTabProps) {
+  const peers = [...(data?.peers ?? [])].sort((a, b) => b.ts - a.ts);
+  const hasSelf = Boolean(data?.self);
   return (
     <div className="space-y-6 text-xs">
       <section className="space-y-2">
         <SectionHeading title="Local Presence" subtitle="Current state published to awareness" />
-        <PresenceCard presence={localPresence} />
+        {hasSelf ? (
+          <PresenceCard presence={data!.self!} isSelf />
+        ) : (
+          <EmptyState message="Local awareness state unavailable." />
+        )}
       </section>
 
       <section className="space-y-2">
         <SectionHeading
           title="Peers"
-          subtitle={peerPresence.length > 0 ? `${peerPresence.length} connected` : "No peers online"}
+          subtitle={peers.length > 0 ? `${peers.length} connected` : "No peers online"}
         />
-        {peerPresence.length === 0 ? (
+        {peers.length === 0 ? (
           <EmptyState message="Only you are connected right now." />
         ) : (
           <div className="space-y-2">
-            {peerPresence.map((presence) => (
+            {peers.map((presence) => (
               <PresenceCard key={presence.clientId} presence={presence} />
             ))}
           </div>
@@ -97,10 +46,10 @@ function SectionHeading({ title, subtitle }: { title: string; subtitle?: string 
   );
 }
 
-function PresenceCard({ presence }: { presence: PresenceEntry }) {
+function PresenceCard({ presence, isSelf }: { presence: AwarenessPresence; isSelf?: boolean }) {
   const editing = presence.editing;
   const cursor = presence.cursor;
-  const title = presence.isSelf ? `${presence.user.name} (you)` : presence.user.name;
+  const title = isSelf ? `${presence.user.name} (you)` : presence.user.name;
 
   return (
     <div className="rounded border border-border/60 bg-muted/20 p-3">
